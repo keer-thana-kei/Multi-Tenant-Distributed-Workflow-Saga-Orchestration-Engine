@@ -5,6 +5,7 @@ const dotenv = require("dotenv");
 const testUserRoutes = require("./routes/testUser");
 const authRoutes = require("./routes/auth");
 const apiKeyRoutes = require("./routes/apiKeys");
+const workflowRoutes = require("./routes/Workflow");
 
 dotenv.config();
 
@@ -22,6 +23,7 @@ app.get("/", (req, res) => {
 app.use("/api/auth", authRoutes);
 app.use("/api/keys", apiKeyRoutes);
 app.use("/api/test", testUserRoutes);
+app.use("/api/workflows", workflowRoutes);
 
 const PORT = process.env.PORT || 5000;
 
