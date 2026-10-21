@@ -1,0 +1,165 @@
+'use strict';
+
+const mongoose = require('mongoose');
+const http = require('http');
+const url = require('url');
+
+const BACKEND_URL = process.env.BACKEND_URL || 'http://localhost:5000';
+
+/**
+ * Perform an HTTP GET and return { ok, statusCode, latencyMs }.
+ */
+function httpGet(targetUrl) {
+  return new Promise((resolve) => {
+    const start = Date.now();
+    const parsed = url.parse(targetUrl);
+    const options = {
+      hostname: parsed.hostname,
+      port: parsed.port || 80,
+      path: parsed.path || '/',
+      method: 'GET',
+      timeout: 5000,
+    };
+
+    const req = http.request(options, (res) => {
+      res.resume(); // drain body
+      resolve({ ok: res.statusCode >= 200 && res.statusCode < 400, statusCode: res.statusCode, latencyMs: Date.now() - start });
+    });
+
+    req.on('timeout', () => {
+      req.destroy();
+      resolve({ ok: false, statusCode: 0, latencyMs: Date.now() - start, error: 'timeout' });
+    });
+
+    req.on('error', (err) => {
+      resolve({ ok: false, statusCode: 0, latencyMs: Date.now() - start, error: err.message });
+    });
+
+    req.end();
+  });
+}
+
+/**
+ * Check MongoDB connection state.
+ */
+async function checkDatabase() {
+  const start = Date.now();
+  const state = mongoose.connection.readyState;
+  // 0=disconnected, 1=connected, 2=connecting, 3=disconnecting
+  const statusMap = { 0: 'down', 1: 'healthy', 2: 'degraded', 3: 'degraded' };
+  const status = statusMap[state] || 'down';
+  return {
+    name: 'mongodb',
+    status,
+    latencyMs: Date.now() - start,
+    detail: `readyState=${state}`,
+  };
+}
+
+/**
+ * Check the backend API health.
+ */
+async function checkApi() {
+  const result = await httpGet(`${BACKEND_URL}/`);
+  return {
+    name: 'api',
+    status: result.ok ? 'healthy' : 'down',
+    latencyMs: result.latencyMs,
+    detail: result.error || `HTTP ${result.statusCode}`,
+  };
+}
+
+/**
+ * Check workers by inspecting recent workflow activity.
+ * A worker is considered "stalled" if a workflow has been in `running` state
+ * for more than WORKER_STALL_MINUTES.
+ */
+async function checkWorkers() {
+  const start = Date.now();
+  const STALL_MINUTES = parseInt(process.env.WORKER_STALL_MINUTES || '10', 10);
+
+  try {
+    const Workflow = mongoose.model('Workflow');
+    const stalledCutoff = new Date(Date.now() - STALL_MINUTES * 60 * 1000);
+    const stalledCount = await Workflow.countDocuments({
+      status: 'running',
+      updatedAt: { $lt: stalledCutoff },
+    });
+
+    const runningCount = await Workflow.countDocuments({ status: 'running' });
+
+    return {
+      name: 'workers',
+      status: stalledCount > 0 ? 'degraded' : 'healthy',
+      latencyMs: Date.now() - start,
+      detail: `running=${runningCount}, stalled_>${STALL_MINUTES}min=${stalledCount}`,
+    };
+  } catch (err) {
+    return {
+      name: 'workers',
+      status: 'down',
+      latencyMs: Date.now() - start,
+      detail: err.message,
+    };
+  }
+}
+
+/**
+ * Check MongoDB Atlas DNS resolution as a dependency check.
+ * Uses the dns module to resolve the cluster hostname.
+ */
+async function checkDependencies() {
+  const start = Date.now();
+  const dns = require('dns').promises;
+
+  const mongoUri = process.env.MONGODB_URI || '';
+  let hostname = 'unknown';
+
+  try {
+    // extract hostname from mongodb+srv://... URI
+    const match = mongoUri.match(/mongodb(?:\+srv)?:\/\/[^@]+@([^/]+)/);
+    if (match) hostname = match[1];
+
+    await dns.lookup(hostname);
+    return {
+      name: 'mongodb-dns',
+      status: 'healthy',
+      latencyMs: Date.now() - start,
+      detail: `resolved ${hostname}`,
+    };
+  } catch (err) {
+    return {
+      name: 'mongodb-dns',
+      status: 'down',
+      latencyMs: Date.now() - start,
+      detail: `failed to resolve ${hostname}: ${err.message}`,
+    };
+  }
+}
+
+/**
+ * Run all health checks and return array of results.
+ */
+async function runHealthChecks() {
+  const results = await Promise.allSettled([
+    checkApi(),
+    checkDatabase(),
+    checkWorkers(),
+    checkDependencies(),
+  ]);
+
+  return results.map((r) =>
+    r.status === 'fulfilled'
+      ? r.value
+      : { name: 'unknown', status: 'down', latencyMs: 0, detail: r.reason?.message }
+  );
+}
+
+// Export everything including individual checkers for unit tests
+module.exports = {
+  runHealthChecks,
+  checkApi,
+  checkDatabase,
+  checkWorkers,
+  checkDependencies,
+};

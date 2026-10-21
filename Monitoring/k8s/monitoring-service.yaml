@@ -1,0 +1,16 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: workflow-monitoring-svc
+  namespace: workflow-engine
+  labels:
+    app: workflow-monitoring
+spec:
+  type: ClusterIP
+  selector:
+    app: workflow-monitoring
+  ports:
+    - name: http
+      port: 4000
+      targetPort: 4000
+      protocol: TCP

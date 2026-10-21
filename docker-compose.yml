@@ -1,0 +1,59 @@
+version: "3.9"
+
+networks:
+  workflow-net:
+    driver: bridge
+
+services:
+  # ── Existing Backend ────────────────────────────────────────────────────
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    image: workflow-engine-backend:latest
+    container_name: workflow-backend
+    restart: unless-stopped
+    ports:
+      - "5000:5000"
+    env_file:
+      - ./backend/.env
+    networks:
+      - workflow-net
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:5000/"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+
+  # ── Monitoring Service ───────────────────────────────────────────────────
+  monitoring:
+    build:
+      context: ./monitoring
+      dockerfile: Dockerfile
+    image: workflow-engine-monitoring:latest
+    container_name: workflow-monitoring
+    restart: unless-stopped
+    ports:
+      - "4000:4000"
+    environment:
+      PORT: "4000"
+      BACKEND_URL: "http://backend:5000"
+      HEALTH_CHECK_INTERVAL: "30"
+      CPU_ALERT_THRESHOLD: "80"
+      MEMORY_ALERT_THRESHOLD: "85"
+      FAILURE_RATE_THRESHOLD: "30"
+      WORKER_STALL_MINUTES: "10"
+    env_file:
+      - ./backend/.env     # shares MONGODB_URI
+    depends_on:
+      backend:
+        condition: service_healthy
+    networks:
+      - workflow-net
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:4000/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 25s
