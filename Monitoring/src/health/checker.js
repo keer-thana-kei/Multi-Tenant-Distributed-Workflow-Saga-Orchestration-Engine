@@ -60,7 +60,7 @@ async function checkDatabase() {
  * Check the backend API health.
  */
 async function checkApi() {
-  const result = await httpGet(`${BACKEND_URL}/`);
+  const result = await httpGet(`${BACKEND_URL}/health`);
   return {
     name: 'api',
     status: result.ok ? 'healthy' : 'down',

@@ -29,7 +29,7 @@ services:
   # ── Monitoring Service ───────────────────────────────────────────────────
   monitoring:
     build:
-      context: ./monitoring
+      context: ./Monitoring
       dockerfile: Dockerfile
     image: workflow-engine-monitoring:latest
     container_name: workflow-monitoring
