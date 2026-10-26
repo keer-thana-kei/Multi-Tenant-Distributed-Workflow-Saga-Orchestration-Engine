@@ -2,19 +2,62 @@
 
 const express = require('express');
 const { requireAuth } = require('../middleware/auth');
+const { defaultRegistry } = require('../metrics/prometheus');
+const { clients } = require('../websocket/hub');
 
 const router = express.Router();
 
 // Apply auth to all metrics routes
 router.use(requireAuth);
 
-// GET /metrics — all metrics (system + all tenants)
+/**
+ * Helper to determine if the client expects Prometheus text exposition format.
+ */
+function isPrometheusRequest(req) {
+  if (req.query.format === 'prometheus') return true;
+  if (req.query.format === 'json') return false;
+
+  const accept = req.headers['accept'] || '';
+  const userAgent = req.headers['user-agent'] || '';
+
+  if (accept.includes('text/plain') || accept.includes('application/openmetrics-text')) {
+    return true;
+  }
+  if (userAgent.startsWith('Prometheus')) {
+    return true;
+  }
+  return false;
+}
+
+// GET /metrics — serves Prometheus text format or JSON based on client request
 router.get('/', (req, res) => {
-  const { metrics } = req.app.locals.state;
+  const { state } = req.app.locals;
+
+  // 1. Prometheus Scrape Request
+  if (isPrometheusRequest(req)) {
+    if (state) {
+      defaultRegistry.updateFromState(state, clients ? clients.size : 0);
+    }
+    res.setHeader('Content-Type', 'text/plain; version=0.0.4; charset=utf-8');
+    return res.send(defaultRegistry.toPrometheus());
+  }
+
+  // 2. Existing JSON API compatibility
+  const metrics = state ? state.metrics : null;
   if (!metrics || Object.keys(metrics).length === 0) {
     return res.status(503).json({ error: 'Metrics not yet collected. Retry in a few seconds.' });
   }
-  res.json(metrics);
+  return res.json(metrics);
+});
+
+// GET /metrics/prometheus — explicit endpoint guaranteed to return Prometheus text
+router.get('/prometheus', (req, res) => {
+  const { state } = req.app.locals;
+  if (state) {
+    defaultRegistry.updateFromState(state, clients ? clients.size : 0);
+  }
+  res.setHeader('Content-Type', 'text/plain; version=0.0.4; charset=utf-8');
+  return res.send(defaultRegistry.toPrometheus());
 });
 
 // GET /metrics/:tenantId — workflow metrics for a single tenant (companyId).

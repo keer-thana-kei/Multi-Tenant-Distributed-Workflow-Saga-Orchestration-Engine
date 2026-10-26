@@ -14,6 +14,7 @@
 
 const logger = require('../logger');
 const { TYPES, createEvent } = require('./schema');
+const { defaultRegistry } = require('../metrics/prometheus');
 
 // Reference to delivery function (injected from hub.js to avoid circular dependencies)
 let _deliverToTenant = null;
@@ -91,6 +92,7 @@ function publishLifecycleEvent(eventType, tenantId, payload, severity = 'info') 
 // ── Convenience lifecycle publishers ────────────────────────────────────────
 
 function notifyWorkflowStarted(doc) {
+  defaultRegistry.workflowLifecycleTotal.inc({ status: 'running' });
   return publishLifecycleEvent(
     TYPES.WORKFLOW_STARTED,
     doc.companyId,
@@ -157,6 +159,7 @@ function notifyStepFailed(doc, stepIndex, error) {
 }
 
 function notifyStepRetry(doc, stepIndex, attempt, maxRetries = 3) {
+  defaultRegistry.workflowStepRetriesTotal.inc();
   const step = doc.steps?.[stepIndex];
   return publishLifecycleEvent(
     TYPES.WORKFLOW_STEP_RETRY,
@@ -192,6 +195,7 @@ function notifyStepRetrySuccess(doc, stepIndex) {
 }
 
 function notifyCompensating(doc, stepIndex) {
+  defaultRegistry.workflowCompensationAttemptsTotal.inc();
   const step = doc.steps?.[stepIndex];
   return publishLifecycleEvent(
     TYPES.WORKFLOW_COMPENSATING,
@@ -209,6 +213,7 @@ function notifyCompensating(doc, stepIndex) {
 }
 
 function notifyCompensationFailed(doc, stepIndex, error) {
+  defaultRegistry.workflowCompensationFailuresTotal.inc();
   const step = stepIndex !== undefined ? doc.steps?.[stepIndex] : null;
   return publishLifecycleEvent(
     TYPES.WORKFLOW_COMPENSATION_FAILED,
@@ -227,6 +232,7 @@ function notifyCompensationFailed(doc, stepIndex, error) {
 }
 
 function notifyWorkflowCompleted(doc) {
+  defaultRegistry.workflowLifecycleTotal.inc({ status: 'success' });
   return publishLifecycleEvent(
     TYPES.WORKFLOW_COMPLETED,
     doc.companyId,
@@ -241,6 +247,7 @@ function notifyWorkflowCompleted(doc) {
 }
 
 function notifyWorkflowFailed(doc, error) {
+  defaultRegistry.workflowLifecycleTotal.inc({ status: 'failed' });
   return publishLifecycleEvent(
     TYPES.WORKFLOW_FAILED,
     doc.companyId,

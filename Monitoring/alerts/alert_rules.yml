@@ -1,0 +1,135 @@
+# Alerting Rules for Multi-Tenant Workflow Saga Engine & Monitoring Service
+# Conforms to Prometheus Alertmanager Rule Specification
+
+groups:
+  - name: saga_engine_service_alerts
+    rules:
+      # ── 1. Backend Unavailability ──────────────────────────────────────────
+      - alert: BackendUnavailable
+        expr: health_check_failures_total{service="api"} > 2 or probe_success{job="workflow-backend"} == 0
+        for: 1m
+        labels:
+          severity: critical
+          service: backend
+          tier: core
+        annotations:
+          summary: "Workflow Backend API is unavailable"
+          description: "Backend service on port 5000 is unreachable or failing health checks consistently."
+          remediation: "Inspect backend logs ('npm start' or 'docker logs workflow-backend'), verify port 5000 availability, and check database connectivity."
+
+      # ── 2. Database Failures ───────────────────────────────────────────────
+      - alert: DatabaseConnectionFailed
+        expr: database_connection_status == 0 or health_check_failures_total{service="mongodb"} > 0
+        for: 30s
+        labels:
+          severity: critical
+          service: mongodb
+          tier: data
+        annotations:
+          summary: "MongoDB connection is down or degraded"
+          description: "Mongoose readyState is not connected (1). All workflow writes and status persistence are blocked."
+          remediation: "Verify MONGODB_URI credentials, inspect MongoDB Atlas cluster health, check network firewall rules, and test cluster DNS resolution."
+
+      # ── 3. Worker Unavailability ───────────────────────────────────────────
+      - alert: WorkerUnavailable
+        expr: worker_availability_status == 0
+        for: 2m
+        labels:
+          severity: critical
+          service: worker
+          tier: engine
+        annotations:
+          summary: "Saga workers are stalled or unavailable"
+          description: "Worker availability status is down. Workflows in 'running' state exceed stall timeout (10 min)."
+          remediation: "Inspect worker logs for execution deadlocks or unhandled exceptions, restart stalled executor instances, and inspect workflows stuck in 'running'."
+
+      # ── 4. High HTTP Error Rate ────────────────────────────────────────────
+      - alert: HighHttpErrorRate
+        expr: (rate(http_requests_total{status_code=~"5.."}[5m]) / (rate(http_requests_total[5m]) + 0.0001)) > 0.05
+        for: 2m
+        labels:
+          severity: warning
+          service: http
+          tier: api
+        annotations:
+          summary: "HTTP 5xx error rate exceeds 5%"
+          description: "Over 5% of HTTP requests returned 5xx server errors during the last 5-minute window."
+          remediation: "Check application error logs for unhandled 500 exceptions, inspect upstream dependency timeouts, and review recent deployments."
+
+      # ── 5. Excessive Request Latency ───────────────────────────────────────
+      - alert: ExcessiveRequestLatency
+        expr: histogram_quantile(0.95, sum(rate(http_request_duration_seconds_bucket[5m])) by (le)) > 2.0
+        for: 3m
+        labels:
+          severity: warning
+          service: http
+          tier: api
+        annotations:
+          summary: "P95 HTTP request latency exceeds 2 seconds"
+          description: "95th percentile request latency has remained above 2.0s for more than 3 minutes."
+          remediation: "Investigate database query performance, check system CPU/memory saturation, and inspect third-party endpoint latencies."
+
+      # ── 6. Workflow Failure Spikes ─────────────────────────────────────────
+      - alert: WorkflowFailureSpike
+        expr: (rate(workflow_lifecycle_total{status="failed"}[15m]) / (rate(workflow_lifecycle_total[15m]) + 0.0001)) > 0.30
+        for: 5m
+        labels:
+          severity: critical
+          service: saga
+          tier: engine
+        annotations:
+          summary: "Workflow saga failure rate exceeds 30%"
+          description: "Over 30% of workflow sagas failed during the last 15 minutes."
+          remediation: "Inspect step errors across failed workflows, verify third-party microservice dependencies, and verify step retry configurations."
+
+      # ── 7. Saga Compensation Failures ──────────────────────────────────────
+      - alert: SagaCompensationFailed
+        expr: increase(workflow_compensation_failures_total[5m]) > 0
+        for: 0m
+        labels:
+          severity: critical
+          service: saga
+          tier: data-integrity
+        annotations:
+          summary: "Saga compensation (rollback) step failed"
+          description: "A workflow rollback routine failed to undo prior completed steps, risking distributed data inconsistency."
+          remediation: "Identify affected workflow ID in logs, inspect the failed compensation endpoint, and execute manual compensating transactions immediately."
+
+      # ── 8. Queue Backlog ───────────────────────────────────────────────────
+      - alert: WorkflowQueueBacklog
+        expr: workflow_queue_depth > 50
+        for: 5m
+        labels:
+          severity: warning
+          service: queue
+          tier: throughput
+        annotations:
+          summary: "Workflow pending queue backlog exceeds 50 jobs"
+          description: "Pending workflow queue depth has remained above 50 for over 5 minutes."
+          remediation: "Scale worker instances, check if executor concurrency limits are saturated, and verify database write throughput."
+
+      # ── 9. Stale Metrics ───────────────────────────────────────────────────
+      - alert: StaleMetrics
+        expr: (time() - workflow_metrics_last_collected_timestamp_seconds) > 120
+        for: 2m
+        labels:
+          severity: warning
+          service: monitoring
+          tier: observability
+        annotations:
+          summary: "Monitoring metrics collection loop is stalled"
+          description: "Workflow metrics have not been updated for over 120 seconds."
+          remediation: "Check monitoring service event loop lag, inspect node-cron execution health, and verify database connectivity."
+
+      # ── 10. Repeated Pod Restarts ──────────────────────────────────────────
+      - alert: RepeatedPodRestarts
+        expr: process_uptime_seconds < 120 and process_uptime_seconds > 0
+        for: 3m
+        labels:
+          severity: warning
+          service: process
+          tier: infrastructure
+        annotations:
+          summary: "Service process or container restarting repeatedly"
+          description: "Process uptime is persistently low (<120s), indicating crash loops or container restarts."
+          remediation: "Inspect process exit codes, check for uncaught exceptions, check out-of-memory (OOM) kill events, and review resource limits."

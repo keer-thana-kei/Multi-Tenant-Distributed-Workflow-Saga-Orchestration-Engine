@@ -201,27 +201,66 @@ Alerts only fire on **state change** (no repeated spam). They auto-clear when th
 
 ---
 
+## Prometheus & Grafana Observability (Subtask 3)
+
+### Prometheus Exposition Endpoint
+- **URL**: `http://localhost:4000/metrics` (or `http://localhost:4000/metrics/prometheus`)
+- **Format**: `text/plain; version=0.0.4; charset=utf-8` (OpenMetrics compatible)
+- **Content Negotiation**: Returns Prometheus text format when requested by Prometheus (`Accept: text/plain` or `?format=prometheus`), and preserves existing JSON format for JSON clients.
+- **Cardinality Safety**: Enforces strict allowlists; drops unbounded labels (`workflow_id`, `user_id`, `request_id`).
+
+### Exact Metric Names
+| Metric Name | Type | Labels | Description |
+|---|---|---|---|
+| `http_requests_total` | Counter | `method`, `route`, `status_code` | Total HTTP requests handled |
+| `http_request_duration_seconds` | Histogram | `method`, `route`, `status_code` | HTTP request latency duration |
+| `workflow_lifecycle_total` | Counter | `status` | Total workflow state transitions |
+| `workflow_execution_duration_seconds`| Histogram | `status` | Workflow execution duration |
+| `workflow_step_retries_total` | Counter | None | Total step execution retry attempts |
+| `workflow_compensation_attempts_total`| Counter | None | Total saga compensation routines initiated |
+| `workflow_compensation_failures_total`| Counter | None | Total saga compensation routines failed |
+| `worker_availability_status` | Gauge | None | Worker status (1=healthy, 0.5=degraded, 0=down) |
+| `workflow_queue_depth` | Gauge | None | Number of pending workflows queued in DB |
+| `health_check_failures_total` | Counter | `service` | Total failed health checks by service |
+| `database_connection_status` | Gauge | None | MongoDB readyState (1=connected, 0=down) |
+| `websocket_active_connections`| Gauge | None | Active WebSocket dashboard connections |
+| `websocket_delivery_failures_total`| Counter | None | WebSocket event delivery errors |
+| `system_cpu_usage_percent` | Gauge | None | Current CPU load percent (0-100) |
+| `system_memory_usage_percent` | Gauge | None | Current memory usage percent (0-100) |
+| `system_memory_used_bytes` | Gauge | None | Memory used in bytes |
+| `system_memory_total_bytes` | Gauge | None | Total system memory in bytes |
+| `workflow_metrics_last_collected_timestamp_seconds`| Gauge | None | Timestamp of last metrics collection |
+| `process_uptime_seconds` | Gauge | None | Monitoring service uptime in seconds |
+
+### Prometheus & Grafana Stack URLs
+- **Prometheus UI**: `http://localhost:9090`
+- **Grafana UI**: `http://localhost:3000` (credentials: `admin` / `admin`)
+- **Dashboard**: `http://localhost:3000/d/saga-engine-overview/multi-tenant-saga-engine-monitoring`
+
+### Configuration Files
+- **Prometheus Scrape Config**: [`monitoring/prometheus/prometheus.yml`](prometheus/prometheus.yml)
+- **Prometheus Alert Rules**: [`monitoring/alerts/alert_rules.yml`](alerts/alert_rules.yml) (10 actionable alerts)
+- **Alertmanager Config**: [`monitoring/alerts/alert_manager_config.yml`](alerts/alert_manager_config.yml) (safe environment variable substitution)
+- **Grafana Datasource**: [`monitoring/grafana/provisioning/datasources/prometheus.yml`](grafana/provisioning/datasources/prometheus.yml)
+- **Grafana Dashboard Provider**: [`monitoring/grafana/provisioning/dashboards/dashboards.yml`](grafana/provisioning/dashboards/dashboards.yml)
+- **Grafana Dashboard Definition**: [`monitoring/grafana/dashboards/saga_engine_overview.json`](grafana/dashboards/saga_engine_overview.json)
+
+---
+
 ## Running Tests
 
-### Unit tests (no server required)
+### All Tests (Unit + Integration)
 ```powershell
-cd monitoring
-npm install
-node --test tests/health.test.js
-node --test tests/alerts.test.js
-node --test tests/metrics.test.js
-# Or run all at once:
+cd Monitoring
 npm test
 ```
-
-### Integration tests (server must be running)
-```powershell
-# In one terminal:
-node src/server.js
-
-# In another terminal:
-node --test tests/websocket.test.js
-```
+Runs 81 tests across 6 suites:
+- `tests/health.test.js` (14 tests)
+- `tests/metrics.test.js` (8 tests)
+- `tests/alerts.test.js` (11 tests)
+- `tests/security.test.js` (14 tests)
+- `tests/websocket.test.js` (17 tests)
+- `tests/prometheus.test.js` (17 tests)
 
 ### Smoke tests (server must be running)
 ```powershell

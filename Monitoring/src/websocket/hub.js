@@ -82,6 +82,10 @@ function sendToClient(ws, event) {
     ws.send(JSON.stringify(event));
   } catch (err) {
     logger.error('WS Hub: send error', { error: err.message });
+    try {
+      const { defaultRegistry } = require('../metrics/prometheus');
+      defaultRegistry.websocketDeliveryFailuresTotal.inc();
+    } catch {}
   }
 }
 

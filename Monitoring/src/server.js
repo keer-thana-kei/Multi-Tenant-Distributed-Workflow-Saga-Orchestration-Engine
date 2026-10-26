@@ -42,6 +42,10 @@ const state = {
 
 // ── Express app ────────────────────────────────────────────────────────────
 const app = express();
+// HTTP request metrics middleware for Prometheus
+const { createHttpMetricsMiddleware } = require('./middleware/httpMetrics');
+app.use(createHttpMetricsMiddleware());
+
 // Body size limit guards against large-payload DoS
 app.use(express.json({ limit: '64kb' }));
 

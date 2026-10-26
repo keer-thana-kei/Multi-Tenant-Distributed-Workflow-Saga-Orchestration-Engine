@@ -6,7 +6,7 @@
   "scripts": {
     "start": "node src/server.js",
     "dev": "nodemon src/server.js",
-    "test": "node --test tests/health.test.js && node --test tests/metrics.test.js && node --test tests/alerts.test.js && node --test tests/security.test.js && node --test tests/websocket.test.js"
+    "test": "node --test tests/health.test.js && node --test tests/metrics.test.js && node --test tests/alerts.test.js && node --test tests/security.test.js && node --test tests/websocket.test.js && node --test tests/prometheus.test.js"
   },
   "dependencies": {
     "dotenv": "^16.4.5",
@@ -15,7 +15,8 @@
     "mongoose": "^8.5.2",
     "node-cron": "^3.0.3",
     "systeminformation": "^5.23.5",
-    "ws": "^8.18.0"
+    "ws": "^8.18.0",
+    "yaml": "^2.9.1"
   },
   "devDependencies": {
     "nodemon": "^3.1.4"
