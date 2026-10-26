@@ -1,7 +1,7 @@
 'use strict';
 
 const express = require('express');
-const { runHealthChecks } = require('../health/checker');
+const { runHealthChecks, checkLiveness, checkReadiness } = require('../health/checker');
 
 const router = express.Router();
 
@@ -24,6 +24,23 @@ router.get('/', async (req, res) => {
     const health = await runHealthChecks();
     const overall = health.every((h) => h.status === 'healthy') ? 'healthy' : 'degraded';
     res.json({ overall, services: health, checkedAt: new Date().toISOString() });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Liveness endpoint – always returns alive
+router.get('/live', (req, res) => {
+  const result = checkLiveness();
+  res.json(result);
+});
+
+// Readiness endpoint – checks DB and API health
+router.get('/ready', async (req, res) => {
+  try {
+    const result = await checkReadiness();
+    const statusCode = result.status === 'healthy' ? 200 : 503;
+    res.status(statusCode).json(result);
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

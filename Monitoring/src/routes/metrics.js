@@ -1,8 +1,12 @@
 'use strict';
 
 const express = require('express');
+const { requireAuth } = require('../middleware/auth');
 
 const router = express.Router();
+
+// Apply auth to all metrics routes
+router.use(requireAuth);
 
 // GET /metrics — all metrics (system + all tenants)
 router.get('/', (req, res) => {
@@ -13,10 +17,23 @@ router.get('/', (req, res) => {
   res.json(metrics);
 });
 
-// GET /metrics/:tenantId — workflow metrics for a single tenant (companyId)
+// GET /metrics/:tenantId — workflow metrics for a single tenant (companyId).
+// Enforcement: caller must either use MONITORING_API_KEY (admin bypass)
+// OR pass X-Tenant-ID header matching the requested tenantId.
 router.get('/:tenantId', (req, res) => {
   const { metrics } = req.app.locals.state;
   const tenantId = req.params.tenantId;
+
+  // Tenant isolation check (admin API-key callers bypass this)
+  if (req.auth && req.auth.method === 'jwt') {
+    const requestedTenant = req.headers['x-tenant-id'];
+    if (!requestedTenant) {
+      return res.status(403).json({ error: 'Missing X-Tenant-ID header.' });
+    }
+    if (requestedTenant !== tenantId) {
+      return res.status(403).json({ error: 'X-Tenant-ID does not match requested tenant.' });
+    }
+  }
 
   if (!metrics || !metrics.workflows) {
     return res.status(503).json({ error: 'Metrics not yet collected.' });
@@ -29,7 +46,6 @@ router.get('/:tenantId', (req, res) => {
   if (!tenant) {
     return res.status(404).json({
       error: `Tenant '${tenantId}' not found in metrics.`,
-      availableTenants: (metrics.workflows.tenants || []).map((t) => t.companyId),
     });
   }
 
