@@ -12,6 +12,7 @@ dotenv.config({ path: path.join(__dirname, '..', '.env') });
 
 // Load sub-systems
 const { createWebSocketHub } = require('./websocket/hub');
+const { createEvent, TYPES } = require('./websocket/schema');
 const { runHealthChecks } = require('./health/checker');
 const { collectMetrics } = require('./metrics/collector');
 const { evaluateAlerts } = require('./alerts/engine');
@@ -66,7 +67,7 @@ app.get('/', (_req, res) => {
 
 // ── HTTP + WS server ───────────────────────────────────────────────────────
 const server = http.createServer(app);
-const broadcast = createWebSocketHub(server);
+const broadcast = createWebSocketHub(server, state);
 
 // ── Polling loop ───────────────────────────────────────────────────────────
 async function runMonitoringCycle() {
@@ -86,11 +87,41 @@ async function runMonitoringCycle() {
       state.alertHistory = [...fired, ...state.alertHistory].slice(0, 100);
     }
 
-    // 4. Broadcast via WebSocket
-    broadcast({ type: 'HEALTH_UPDATE', data: health, ts: Date.now() });
-    broadcast({ type: 'METRICS_UPDATE', data: metrics, ts: Date.now() });
+    // 4. Broadcast via WebSocket (schema-wrapped)
+    broadcast(createEvent(TYPES.SYSTEM_HEALTH, null, { services: health }, 'info'));
+    broadcast(createEvent(TYPES.METRICS_UPDATE, null, { system: metrics.system, workflows: metrics.workflows }, 'info'));
+
+    // Worker availability event (only when obtained from health check)
+    const workerSvc = (health || []).find((s) => s.name === 'workers');
+    if (workerSvc) {
+      broadcast(createEvent(TYPES.WORKER_AVAILABILITY, null, {
+        status: workerSvc.status,
+        detail: workerSvc.detail,
+        latencyMs: workerSvc.latencyMs,
+      }, workerSvc.status === 'healthy' ? 'info' : 'warn'));
+    }
+
+    // Queue backlog event (only when obtained from real workflow metrics)
+    if (metrics.workflows && typeof metrics.workflows.global?.pending === 'number') {
+      const pendingCount = metrics.workflows.global.pending;
+      broadcast(createEvent(TYPES.QUEUE_BACKLOG, null, {
+        pending: pendingCount,
+        running: metrics.workflows.global.running,
+        total: metrics.workflows.global.total,
+      }, pendingCount > 50 ? 'warn' : 'info'));
+    }
+
+    // Dependency health event (only when obtained from health checks)
+    const depSvcs = (health || []).filter((s) => ['mongodb', 'mongodb-dns', 'api'].includes(s.name));
+    if (depSvcs.length > 0) {
+      const hasDown = depSvcs.some((s) => s.status === 'down');
+      broadcast(createEvent(TYPES.DEPENDENCY_HEALTH, null, { dependencies: depSvcs }, hasDown ? 'error' : 'info'));
+    }
+
     if (fired.length) {
-      fired.forEach((alert) => broadcast({ type: 'ALERT_FIRED', data: alert, ts: Date.now() }));
+      fired.forEach((alert) =>
+        broadcast(createEvent(TYPES.ALERT_FIRED, null, { alert }, alert.severity || 'warn'))
+      );
     }
   } catch (err) {
     logger.error('Monitor cycle error', { error: err.message });

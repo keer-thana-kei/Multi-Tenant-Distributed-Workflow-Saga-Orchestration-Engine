@@ -1,16 +1,25 @@
 # Monitoring smoke test — PowerShell (Windows)
 # Run from the repo root after starting the monitoring server:
-#   node monitoring/src/server.js
-# Usage: pwsh monitoring/scripts/smoke-test.ps1
+#   node Monitoring/src/server.js
+# Usage: pwsh Monitoring/scripts/smoke-test.ps1
 
 param(
     [string]$BaseUrl = "http://localhost:4000",
+    [string]$ApiKey = $env:MONITORING_API_KEY,
     [int]$WaitSeconds = 30
 )
+
+if (-not $ApiKey) {
+    $ApiKey = "dev-monitoring-key-change-me"
+}
 
 $ErrorActionPreference = "Stop"
 $passed = 0
 $failed = 0
+
+$headers = @{
+    "X-Monitoring-Key" = $ApiKey
+}
 
 function Pass([string]$msg) {
     Write-Host "[PASS] $msg" -ForegroundColor Green
@@ -37,6 +46,7 @@ function WaitForEndpoint([string]$url, [int]$timeoutSec) {
 Write-Host ""
 Write-Host "=== Monitoring Smoke Test ===" -ForegroundColor Cyan
 Write-Host "Target: $BaseUrl"
+Write-Host "ApiKey: $ApiKey"
 Write-Host ""
 
 # ── Step 1: Wait for server to be ready ───────────────────────────────────
@@ -44,14 +54,14 @@ Write-Host "Waiting up to ${WaitSeconds}s for monitoring server..." -ForegroundC
 $ready = WaitForEndpoint "$BaseUrl/" $WaitSeconds
 if (-not $ready) {
     Write-Host "[ERROR] Monitoring server did not become ready in ${WaitSeconds}s." -ForegroundColor Red
-    Write-Host "        Start it with: node monitoring/src/server.js"
+    Write-Host "        Start it with: node Monitoring/src/server.js"
     exit 1
 }
 Pass "Server is reachable at $BaseUrl"
 
 # ── Step 2: GET /health returns 200 ──────────────────────────────────────
 try {
-    $r = Invoke-WebRequest -Uri "$BaseUrl/health" -UseBasicParsing
+    $r = Invoke-WebRequest -Uri "$BaseUrl/health" -Headers $headers -UseBasicParsing
     if ($r.StatusCode -eq 200) { Pass "GET /health → HTTP 200" }
     else { Fail "GET /health returned HTTP $($r.StatusCode)" }
 
@@ -69,7 +79,7 @@ try {
 
 # ── Step 3: All services report a known status ────────────────────────────
 try {
-    $body = (Invoke-WebRequest -Uri "$BaseUrl/health" -UseBasicParsing).Content | ConvertFrom-Json
+    $body = (Invoke-WebRequest -Uri "$BaseUrl/health" -Headers $headers -UseBasicParsing).Content | ConvertFrom-Json
     $validStatuses = @("healthy","degraded","down")
     $badServices = $body.services | Where-Object { $_.status -notin $validStatuses }
     if ($badServices.Count -eq 0) {
@@ -83,7 +93,7 @@ try {
 
 # ── Step 4: GET /metrics returns 200 with system data ────────────────────
 try {
-    $r = Invoke-WebRequest -Uri "$BaseUrl/metrics" -UseBasicParsing
+    $r = Invoke-WebRequest -Uri "$BaseUrl/metrics" -Headers $headers -UseBasicParsing
     if ($r.StatusCode -eq 200) { Pass "GET /metrics → HTTP 200" }
     else { Fail "GET /metrics returned HTTP $($r.StatusCode)" }
 
@@ -102,7 +112,7 @@ try {
 
 # ── Step 5: GET /alerts returns 200 ──────────────────────────────────────
 try {
-    $r = Invoke-WebRequest -Uri "$BaseUrl/alerts" -UseBasicParsing
+    $r = Invoke-WebRequest -Uri "$BaseUrl/alerts" -Headers $headers -UseBasicParsing
     if ($r.StatusCode -eq 200) { Pass "GET /alerts → HTTP 200" }
     else { Fail "GET /alerts returned HTTP $($r.StatusCode)" }
 
@@ -115,7 +125,7 @@ try {
 
 # ── Step 6: GET /api/status returns combined payload ─────────────────────
 try {
-    $r = Invoke-WebRequest -Uri "$BaseUrl/api/status" -UseBasicParsing
+    $r = Invoke-WebRequest -Uri "$BaseUrl/api/status" -Headers $headers -UseBasicParsing
     if ($r.StatusCode -eq 200) { Pass "GET /api/status → HTTP 200" }
     else { Fail "GET /api/status returned HTTP $($r.StatusCode)" }
 
@@ -128,13 +138,14 @@ try {
     Fail "GET /api/status threw: $_"
 }
 
-# ── Step 7: WebSocket connects and sends first message ────────────────────
+# ── Step 7: WebSocket connects and receives schema-wrapped event ─────────
 Write-Host ""
 Write-Host "--- WebSocket test ---" -ForegroundColor Yellow
 $wsResult = $false
 try {
     Add-Type -AssemblyName System.Net.WebSockets.Client
-    $wsUri = [Uri]("ws://localhost:4000")
+    $wsTarget = $BaseUrl.Replace("http://", "ws://").Replace("https://", "wss://") + "/?apiKey=$ApiKey"
+    $wsUri = [Uri]($wsTarget)
     $client = [System.Net.WebSockets.ClientWebSocket]::new()
     $cts = [System.Threading.CancellationTokenSource]::new(8000)
     $connectTask = $client.ConnectAsync($wsUri, $cts.Token)
@@ -146,10 +157,16 @@ try {
         $recvTask = $client.ReceiveAsync($seg, $cts.Token)
         $recvTask.Wait(6000) | Out-Null
         $result = $recvTask.Result
-        $msg = [System.Text.Encoding]::UTF8.GetString($buf, 0, $result.Count)
-        if ($msg.Length -gt 0) {
-            Pass "WebSocket received first message ($($msg.Length) bytes)"
-            $wsResult = $true
+        $raw = [System.Text.Encoding]::UTF8.GetString($buf, 0, $result.Count)
+        if ($raw.Length -gt 0) {
+            $msg = $raw | ConvertFrom-Json
+            if ($msg.v -eq "1" -and $msg.type -eq "CONNECTED") {
+                Pass "WebSocket received schema CONNECTED event (v=$($msg.v), seq=$($msg.seq))"
+                $wsResult = $true
+            } else {
+                Pass "WebSocket received valid message ($($raw.Length) bytes)"
+                $wsResult = $true
+            }
         } else {
             Fail "WebSocket connected but received empty message"
         }

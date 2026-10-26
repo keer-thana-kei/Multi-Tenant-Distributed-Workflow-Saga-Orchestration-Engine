@@ -113,22 +113,75 @@ All endpoints return JSON.
 
 ---
 
-## WebSocket Events
+## WebSocket Real-Time Event Feed (Subtask 2)
 
-Connect to `ws://localhost:4000`. All messages are JSON.
+Connect to `ws://localhost:4000` or `ws://localhost:4000/ws`.
 
-| Type | Trigger | Payload |
-|------|---------|---------|
-| `CONNECTED` | On connect | `{ type, ts, message }` |
-| `HEALTH_UPDATE` | Every poll cycle | `{ type, ts, data: [ServiceHealth] }` |
-| `METRICS_UPDATE` | Every poll cycle | `{ type, ts, data: MetricsObject }` |
-| `ALERT_FIRED` | New alert state change | `{ type, ts, data: Alert }` |
-| `WORKFLOW_EVENT` | MongoDB change stream | `{ type, ts, data: { operationType, workflowId, companyId, status } }` |
+### Authentication
+Every connection requires server-side authentication via upgrade headers or query parameters:
+1. **API Key (Admin / All-Tenant Access)**:
+   - Header: `X-Monitoring-Key: <MONITORING_API_KEY>`
+   - Query: `ws://localhost:4000/?apiKey=<MONITORING_API_KEY>`
+2. **JWT (Tenant Isolated Access)**:
+   - Header: `Authorization: Bearer <jwt_token>`
+   - Query: `ws://localhost:4000/?token=<jwt_token>`
+   - Subprotocol: `Sec-WebSocket-Protocol: Bearer, <jwt_token>`
+   - Tenant identity is derived server-side from `payload.companyId` or `payload.tenantId`.
+   - Cross-tenant subscription attempts are automatically rejected with close code `4003`.
 
-### Browser quick-test
+### Versioned Event Envelope
+All messages adhere to version 1 JSON envelope:
+```json
+{
+  "v": "1",
+  "type": "WORKFLOW_STEP_SUCCESS",
+  "ts": "2026-10-26T14:09:28.935Z",
+  "seq": 4,
+  "severity": "info",
+  "tenantId": "tenant-alpha",
+  "payload": {
+    "workflowId": "wf-saga-001",
+    "workflowName": "PaymentSaga",
+    "stepIndex": 0,
+    "stepName": "ChargeCard",
+    "stepStatus": "success"
+  }
+}
+```
+
+### Supported Event Types
+| Event Type | Category | Severity | Description |
+|---|---|---|---|
+| `CONNECTED` | Connection | `info` | Handshake acknowledgment containing tenant scope |
+| `SNAPSHOT` | Snapshot | `info` | Fresh authorized snapshot on connect (`seq: 0`) |
+| `WORKFLOW_STARTED` | Saga Lifecycle | `info` | Workflow transitioned to `running` |
+| `WORKFLOW_STEP_RUNNING` | Saga Lifecycle | `info` | Step execution initiated |
+| `WORKFLOW_STEP_SUCCESS` | Saga Lifecycle | `info` | Step completed successfully |
+| `WORKFLOW_STEP_FAILED` | Saga Lifecycle | `warn` | Step encountered an execution error |
+| `WORKFLOW_STEP_RETRY` | Saga Lifecycle | `warn` | Step retry attempt initiated |
+| `WORKFLOW_STEP_RETRY_SUCCESS`| Saga Lifecycle | `info` | Step succeeded after retry |
+| `WORKFLOW_COMPENSATING` | Saga Lifecycle | `warn` | Rollback/compensation in progress (`rolled back`) |
+| `WORKFLOW_COMPENSATION_FAILED`| Saga Lifecycle| `error` | Compensation encountered a failure |
+| `WORKFLOW_FAILED` | Saga Lifecycle | `error` | Workflow failed (compensated or uncompensated) |
+| `WORKFLOW_COMPLETED` | Saga Lifecycle | `info` | All steps succeeded |
+| `SYSTEM_HEALTH` | Infrastructure | `info` | Health check results across all dependencies |
+| `METRICS_UPDATE` | Infrastructure | `info` | CPU, memory, and workflow throughput metrics |
+| `WORKER_AVAILABILITY` | Infrastructure | `info`/`warn` | Real worker stall / liveness status |
+| `QUEUE_BACKLOG` | Infrastructure | `info`/`warn` | Real pending workflow queue backlog count |
+| `DEPENDENCY_HEALTH` | Infrastructure | `info`/`error` | Database, DNS, and API dependency health |
+| `ALERT_FIRED` | Alerting | `warn`/`error` | Alert rule condition triggered |
+
+### Change Streams & Graceful Fallback
+- **MongoDB Change Streams**: Real-time push directly from replica set oplog with sub-10ms delivery latency.
+- **Graceful Fallback**: On standalone MongoDB instances or change stream errors, the hub automatically activates bounded polling every 5s (`WS_POLL_INTERVAL_MS`).
+- **Trade-off**: Polling introduces up to 5s delivery latency and periodic read queries, but guarantees resilience across any MongoDB setup without crashing.
+- **Saga Adapter**: The non-invasive `sagaAdapter` (`src/websocket/adapter.js`) provides direct dispatch from the engine, wrapping delivery in try/catch so monitoring issues never interrupt saga orchestration.
+
+### Browser Test
 ```js
-const ws = new WebSocket('ws://localhost:4000');
-ws.onmessage = e => console.log(JSON.parse(e.data));
+const token = 'your-jwt-token';
+const ws = new WebSocket(`ws://localhost:4000/?token=${token}`);
+ws.onmessage = (e) => console.log('Event received:', JSON.parse(e.data));
 ```
 
 ---

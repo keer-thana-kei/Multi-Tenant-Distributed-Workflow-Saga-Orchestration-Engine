@@ -6,7 +6,7 @@
   "scripts": {
     "start": "node src/server.js",
     "dev": "nodemon src/server.js",
-    "test": "node --test tests/health.test.js && node --test tests/metrics.test.js && node --test tests/alerts.test.js && node --test tests/security.test.js"
+    "test": "node --test tests/health.test.js && node --test tests/metrics.test.js && node --test tests/alerts.test.js && node --test tests/security.test.js && node --test tests/websocket.test.js"
   },
   "dependencies": {
     "dotenv": "^16.4.5",
