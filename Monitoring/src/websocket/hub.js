@@ -2,6 +2,15 @@
 
 const { WebSocketServer, WebSocket } = require('ws');
 const mongoose = require('mongoose');
+const logger = require('../logger');
+
+// Config from environment
+const ALLOWED_ORIGINS_RAW = process.env.ALLOWED_WS_ORIGINS || '*';
+const ALLOWED_ORIGINS = ALLOWED_ORIGINS_RAW === '*' ? null : ALLOWED_ORIGINS_RAW.split(',').map((s) => s.trim());
+const WS_MAX_CLIENTS = parseInt(process.env.WS_MAX_CLIENTS || '100', 10);
+const WS_HEARTBEAT_INTERVAL_MS = parseInt(process.env.WS_HEARTBEAT_INTERVAL_MS || '30000', 10);
+const WS_HEARTBEAT_TIMEOUT_MS = parseInt(process.env.WS_HEARTBEAT_TIMEOUT_MS || '10000', 10);
+const WS_MAX_MESSAGE_BYTES = 512;
 
 const clients = new Set();
 
@@ -13,7 +22,7 @@ function sendToClient(ws, message) {
     try {
       ws.send(JSON.stringify(message));
     } catch (err) {
-      console.error('[WS Hub] Send error:', err.message);
+      logger.error('WS send error', { error: err.message });
     }
   }
 }
@@ -28,14 +37,29 @@ function broadcast(message) {
 }
 
 /**
+ * Start heartbeat loop: ping all clients every interval, terminate those that don't pong.
+ */
+function startHeartbeat() {
+  setInterval(() => {
+    for (const ws of clients) {
+      if (!ws.isAlive) {
+        logger.warn('WS client timed out, terminating');
+        clients.delete(ws);
+        ws.terminate();
+        return;
+      }
+      ws.isAlive = false;
+      ws.ping();
+    }
+  }, WS_HEARTBEAT_INTERVAL_MS);
+}
+
+/**
  * Start a MongoDB change stream to broadcast real-time workflow mutations.
- * This provides tenant-aware live updates whenever a workflow is created,
- * updated, or deleted.
  */
 function startChangeStream() {
-  // Guard: only start if connected
   if (mongoose.connection.readyState !== 1) {
-    console.warn('[WS Hub] MongoDB not connected, skipping change stream setup');
+    logger.warn('WS Hub: MongoDB not connected, skipping change stream setup');
     return;
   }
 
@@ -61,45 +85,69 @@ function startChangeStream() {
     });
 
     changeStream.on('error', (err) => {
-      console.error('[WS Hub] Change stream error:', err.message);
-      // Do not crash – change streams may not be available on standalone MongoDB
+      logger.error('WS Hub: change stream error', { error: err.message });
     });
 
-    console.log('[WS Hub] MongoDB change stream active');
+    logger.info('WS Hub: MongoDB change stream active');
   } catch (err) {
-    console.warn('[WS Hub] Could not start change stream:', err.message);
+    logger.warn('WS Hub: could not start change stream', { error: err.message });
   }
 }
 
 /**
  * Create and attach a WebSocket server to the provided HTTP server.
- * Returns the broadcast function for use by the monitoring server loop.
- *
  * @param {http.Server} httpServer
  * @returns {Function} broadcast
  */
 function createWebSocketHub(httpServer) {
   const wss = new WebSocketServer({ server: httpServer });
 
-  wss.on('connection', (ws, req) => {
-    const ip = req.socket.remoteAddress;
-    console.log(`[WS Hub] Client connected from ${ip}. Total: ${clients.size + 1}`);
-    clients.add(ws);
+  startHeartbeat();
 
-    // Send a welcome/snapshot message immediately
+  wss.on('connection', (ws, req) => {
+    const origin = req.headers.origin || '';
+    const ip = req.socket.remoteAddress;
+
+    // Origin validation
+    if (ALLOWED_ORIGINS && !ALLOWED_ORIGINS.includes(origin)) {
+      logger.warn('WS Hub: rejected connection from disallowed origin', { origin, ip });
+      ws.close(4001, 'Origin not allowed');
+      return;
+    }
+
+    // Max clients limit
+    if (clients.size >= WS_MAX_CLIENTS) {
+      logger.warn('WS Hub: max clients reached, rejecting connection', { max: WS_MAX_CLIENTS });
+      ws.close(4002, 'Max connections reached');
+      return;
+    }
+
+    ws.isAlive = true;
+    ws.on('pong', () => { ws.isAlive = true; });
+
+    clients.add(ws);
+    logger.info('WS Hub: client connected', { ip, total: clients.size });
+
+    // Send a welcome message immediately
     sendToClient(ws, { type: 'CONNECTED', ts: Date.now(), message: 'Monitoring WebSocket connected' });
+
+    ws.on('message', (data) => {
+      // WS is a read-only feed; ignore incoming messages but guard payload size
+      if (data && data.length > WS_MAX_MESSAGE_BYTES) {
+        logger.warn('WS Hub: oversized incoming message ignored', { bytes: data.length });
+      }
+      // No-op — no incoming commands processed
+    });
 
     ws.on('close', () => {
       clients.delete(ws);
-      console.log(`[WS Hub] Client disconnected. Remaining: ${clients.size}`);
+      logger.info('WS Hub: client disconnected', { remaining: clients.size });
     });
 
     ws.on('error', (err) => {
-      console.error('[WS Hub] Client error:', err.message);
+      logger.error('WS Hub: client error', { error: err.message });
       clients.delete(ws);
     });
-
-    // Ignore incoming messages (read-only feed)
   });
 
   // Set up change streams once MongoDB is connected
@@ -112,8 +160,14 @@ function createWebSocketHub(httpServer) {
     startChangeStream();
   }
 
-  console.log('[WS Hub] WebSocket hub initialised');
+  logger.info('WS Hub: WebSocket hub initialised', {
+    maxClients: WS_MAX_CLIENTS,
+    heartbeatIntervalMs: WS_HEARTBEAT_INTERVAL_MS,
+    allowedOrigins: ALLOWED_ORIGINS_RAW,
+  });
+
   return broadcast;
 }
 
 module.exports = { createWebSocketHub, broadcast };
+

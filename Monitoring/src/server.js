@@ -6,6 +6,7 @@ const mongoose = require('mongoose');
 const cron = require('node-cron');
 const dotenv = require('dotenv');
 const path = require('path');
+const logger = require('./logger');
 
 dotenv.config({ path: path.join(__dirname, '..', '.env') });
 
@@ -25,6 +26,11 @@ const PORT = parseInt(process.env.PORT || '4000', 10);
 const MONGODB_URI = process.env.MONGODB_URI;
 const HEALTH_CHECK_INTERVAL = parseInt(process.env.HEALTH_CHECK_INTERVAL || '30', 10);
 
+// Startup security warning if no auth secrets configured
+if (!process.env.JWT_SECRET && !process.env.MONITORING_API_KEY) {
+  logger.warn('SECURITY: Neither JWT_SECRET nor MONITORING_API_KEY is set — sensitive routes are UNPROTECTED.');
+}
+
 // ── In-memory state shared across modules ──────────────────────────────────
 const state = {
   health: [],
@@ -35,12 +41,13 @@ const state = {
 
 // ── Express app ────────────────────────────────────────────────────────────
 const app = express();
-app.use(express.json());
+// Body size limit guards against large-payload DoS
+app.use(express.json({ limit: '64kb' }));
 
-// CORS
+// CORS — expose custom headers to browser clients
 app.use((req, res, next) => {
   res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Monitoring-Key, X-Tenant-ID');
   next();
 });
 
@@ -86,35 +93,34 @@ async function runMonitoringCycle() {
       fired.forEach((alert) => broadcast({ type: 'ALERT_FIRED', data: alert, ts: Date.now() }));
     }
   } catch (err) {
-    console.error('[Monitor] Cycle error:', err.message);
+    logger.error('Monitor cycle error', { error: err.message });
   }
 }
 
 // ── Start ──────────────────────────────────────────────────────────────────
 async function start() {
-  // Connect to MongoDB
   if (!MONGODB_URI) {
-    console.error('[Monitor] MONGODB_URI is not set in .env');
+    logger.error('MONGODB_URI is not set in .env');
     process.exit(1);
   }
 
   try {
     await mongoose.connect(MONGODB_URI);
-    console.log('[Monitor] MongoDB connected');
+    logger.info('MongoDB connected');
   } catch (err) {
-    console.error('[Monitor] MongoDB connection failed:', err.message);
+    logger.error('MongoDB connection failed', { error: err.message });
     process.exit(1);
   }
 
   server.listen(PORT, () => {
-    console.log(`[Monitor] HTTP server listening on http://localhost:${PORT}`);
-    console.log(`[Monitor] WebSocket server ready at ws://localhost:${PORT}`);
+    logger.info('HTTP server listening', { url: `http://localhost:${PORT}` });
+    logger.info('WebSocket server ready', { url: `ws://localhost:${PORT}` });
   });
 
   // Run once immediately, then on schedule
   await runMonitoringCycle();
   cron.schedule(`*/${HEALTH_CHECK_INTERVAL} * * * * *`, runMonitoringCycle);
-  console.log(`[Monitor] Health checks scheduled every ${HEALTH_CHECK_INTERVAL}s`);
+  logger.info('Health checks scheduled', { intervalSeconds: HEALTH_CHECK_INTERVAL });
 }
 
 start();

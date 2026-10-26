@@ -18,7 +18,7 @@ function httpGet(targetUrl) {
       port: parsed.port || 80,
       path: parsed.path || '/',
       method: 'GET',
-      timeout: 5000,
+      timeout: parseInt(process.env.DEPENDENCY_TIMEOUT_MS || '4000'),
     };
 
     const req = http.request(options, (res) => {
@@ -59,15 +59,44 @@ async function checkDatabase() {
 /**
  * Check the backend API health.
  */
-async function checkApi() {
-  const result = await httpGet(`${BACKEND_URL}/health`);
-  return {
-    name: 'api',
-    status: result.ok ? 'healthy' : 'down',
-    latencyMs: result.latencyMs,
-    detail: result.error || `HTTP ${result.statusCode}`,
-  };
-}
+  async function checkApi() {
+    const result = await httpGet(`${BACKEND_URL}/health`);
+    return {
+      name: 'api',
+      status: result.ok ? 'healthy' : 'down',
+      latencyMs: result.latencyMs,
+      detail: result.error || `HTTP ${result.statusCode}`,
+    };
+  }
+
+  // Liveness check – always reports alive for the process itself
+  function checkLiveness() {
+    return {
+      name: 'process',
+      status: 'alive',
+      uptime: process.uptime(),
+      pid: process.pid,
+    };
+  }
+
+  // Readiness check – ensures both DB and API are healthy
+  async function checkReadiness() {
+    const [db, api] = await Promise.all([checkDatabase(), checkApi()]);
+    const overallStatus = db.status === 'healthy' && api.status === 'healthy' ? 'healthy' : 'degraded';
+    return {
+      name: 'readiness',
+      status: overallStatus,
+      details: { db: db.status, api: api.status },
+    };
+  }
+
+  // Sanitize error messages to remove credentials
+  function sanitizeError(msg) {
+    if (typeof msg !== 'string') return msg;
+    return msg
+      .replace(/mongodb\+srv:\/\/[^@]+@/gi, '[REDACTED_MONGODB]')
+      .replace(/:[^:@\/]{8,}@/gi, ':[REDACTED_PASSWORD]@');
+  }
 
 /**
  * Check workers by inspecting recent workflow activity.
@@ -162,4 +191,7 @@ module.exports = {
   checkDatabase,
   checkWorkers,
   checkDependencies,
+  checkLiveness,
+  checkReadiness,
+  sanitizeError,
 };
