@@ -108,3 +108,56 @@ describe('Health result shape', () => {
     assert.ok('detail' in result, 'missing detail');
   });
 });
+
+const { checkLiveness, checkReadiness, sanitizeError } = require('../src/health/checker');
+
+// ── checkLiveness ──────────────────────────────────────────────────────────
+describe('checkLiveness', () => {
+  test('always returns alive status', () => {
+    const result = checkLiveness();
+    assert.equal(result.name, 'process');
+    assert.equal(result.status, 'alive');
+    assert.ok(typeof result.uptime === 'number');
+    assert.ok(typeof result.pid === 'number');
+  });
+
+  test('returns alive even when DB is disconnected', () => {
+    Object.defineProperty(mongoose.connection, 'readyState', { value: 0, configurable: true });
+    const result = checkLiveness();
+    assert.equal(result.status, 'alive');
+  });
+});
+
+// ── checkReadiness ─────────────────────────────────────────────────────────
+describe('checkReadiness', () => {
+  test('returns degraded when DB is down', async () => {
+    Object.defineProperty(mongoose.connection, 'readyState', { value: 0, configurable: true });
+    const result = await checkReadiness();
+    assert.equal(result.name, 'readiness');
+    assert.equal(result.status, 'degraded');
+  });
+});
+
+// ── sanitizeError ──────────────────────────────────────────────────────────
+describe('sanitizeError', () => {
+  test('redacts mongodb+srv credentials', () => {
+    const dirty = 'connect: mongodb+srv://user:secret@cluster.mongodb.net';
+    const clean = sanitizeError(dirty);
+    assert.ok(!clean.includes('user:secret'), 'credentials must be removed');
+  });
+
+  test('redacts :password@ pattern', () => {
+    const dirty = 'ECONNRESET connecting to user:mypassword@127.0.0.1';
+    const clean = sanitizeError(dirty);
+    assert.ok(!clean.includes('mypassword'), 'password must be removed');
+  });
+
+  test('passes through safe strings unchanged', () => {
+    const safe = 'ETIMEDOUT: connection refused';
+    assert.equal(sanitizeError(safe), safe);
+  });
+
+  test('handles null gracefully', () => {
+    assert.equal(sanitizeError(null), null);
+  });
+});
