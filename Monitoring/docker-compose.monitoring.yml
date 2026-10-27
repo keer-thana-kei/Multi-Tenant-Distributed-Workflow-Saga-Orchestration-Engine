@@ -1,0 +1,191 @@
+# =============================================================================
+# Monitoring & Observability Stack — Docker Compose
+# Multi-Tenant Distributed Workflow Saga Orchestration Engine
+#
+# Services included:
+#   1. monitoring    — Node.js health checker, telemetry collector & WebSocket hub
+#   2. prometheus    — Time-series metrics scraper & alerting evaluation engine
+#   3. alertmanager  — Deduplication, grouping, and alert dispatch router
+#   4. grafana       — Operational dashboards and telemetry visualization
+#
+# Usage (from repository root):
+#   docker compose -f Monitoring/docker-compose.monitoring.yml up -d
+#   docker compose -f Monitoring/docker-compose.monitoring.yml config
+#   docker compose -f Monitoring/docker-compose.monitoring.yml down
+# =============================================================================
+
+services:
+  # ── 1. Monitoring Microservice ──────────────────────────────────────────────
+  monitoring:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: workflow-engine-monitoring:latest
+    container_name: workflow-monitoring
+    restart: unless-stopped
+    ports:
+      # Published on localhost only by default for secure access
+      - "127.0.0.1:${MONITORING_PORT:-4000}:4000"
+    environment:
+      PORT: "4000"
+      BACKEND_URL: "${BACKEND_URL:-http://workflow-backend:5000}"
+      MONGODB_URI: "${MONGODB_URI:-}"
+      JWT_SECRET: "${JWT_SECRET:-wf-engine-s3cr3t-jwt-k3y-change-in-production}"
+      MONITORING_API_KEY: "${MONITORING_API_KEY:-dev-monitoring-key-change-me}"
+      HEALTH_CHECK_INTERVAL: "${HEALTH_CHECK_INTERVAL:-30}"
+      DEPENDENCY_TIMEOUT_MS: "${DEPENDENCY_TIMEOUT_MS:-4000}"
+      CPU_ALERT_THRESHOLD: "${CPU_ALERT_THRESHOLD:-80}"
+      MEMORY_ALERT_THRESHOLD: "${MEMORY_ALERT_THRESHOLD:-85}"
+      FAILURE_RATE_THRESHOLD: "${FAILURE_RATE_THRESHOLD:-30}"
+      WORKER_STALL_MINUTES: "${WORKER_STALL_MINUTES:-10}"
+      ALLOWED_WS_ORIGINS: "${ALLOWED_WS_ORIGINS:-*}"
+      WS_MAX_CLIENTS: "${WS_MAX_CLIENTS:-100}"
+      WS_HEARTBEAT_INTERVAL_MS: "${WS_HEARTBEAT_INTERVAL_MS:-30000}"
+      WS_HEARTBEAT_TIMEOUT_MS: "${WS_HEARTBEAT_TIMEOUT_MS:-10000}"
+      WS_SLOW_CLIENT_BYTES: "${WS_SLOW_CLIENT_BYTES:-262144}"
+      WS_POLL_INTERVAL_MS: "${WS_POLL_INTERVAL_MS:-5000}"
+    env_file:
+      - path: ./.env
+        required: false
+      - path: ../backend/.env
+        required: false
+    deploy:
+      resources:
+        limits:
+          cpus: "0.50"
+          memory: 512M
+        reservations:
+          cpus: "0.10"
+          memory: 128M
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:4000/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 25s
+    networks:
+      - workflow-net
+
+  # ── 2. Alertmanager (Notification & Dispatch Router) ────────────────────────
+  alertmanager:
+    image: prom/alertmanager:v0.27.0
+    container_name: workflow-alertmanager
+    restart: unless-stopped
+    ports:
+      # Management port kept local by default
+      - "127.0.0.1:${ALERTMANAGER_PORT:-9093}:9093"
+    volumes:
+      - ./alerts/alert_manager_config.yml:/etc/alertmanager/alertmanager.yml:ro
+      - alertmanager-data:/alertmanager
+    command:
+      - '--config.file=/etc/alertmanager/alertmanager.yml'
+      - '--storage.path=/alertmanager'
+    deploy:
+      resources:
+        limits:
+          cpus: "0.25"
+          memory: 256M
+        reservations:
+          cpus: "0.05"
+          memory: 64M
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:9093/-/ready"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+    networks:
+      - workflow-net
+
+  # ── 3. Prometheus (Metrics Scraper & Alert Evaluator) ───────────────────────
+  prometheus:
+    image: prom/prometheus:v2.53.1
+    container_name: workflow-prometheus
+    restart: unless-stopped
+    ports:
+      # Localhost only by default; use reverse proxy with TLS/auth for remote
+      - "127.0.0.1:${PROMETHEUS_PORT:-9090}:9090"
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./alerts/alert_rules.yml:/etc/prometheus/alert_rules.yml:ro
+      - prometheus-data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--web.console.libraries=/usr/share/prometheus/console_libraries'
+      - '--web.console.templates=/usr/share/prometheus/consoles'
+      - '--web.enable-lifecycle'
+    depends_on:
+      monitoring:
+        condition: service_healthy
+      alertmanager:
+        condition: service_started
+    deploy:
+      resources:
+        limits:
+          cpus: "0.50"
+          memory: 512M
+        reservations:
+          cpus: "0.10"
+          memory: 128M
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:9090/-/ready"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+    networks:
+      - workflow-net
+
+  # ── 4. Grafana (Operational Telemetry Dashboards) ───────────────────────────
+  grafana:
+    image: grafana/grafana:11.1.0
+    container_name: workflow-grafana
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:${GRAFANA_PORT:-3000}:3000"
+    environment:
+      GF_SECURITY_ADMIN_USER: "${GRAFANA_ADMIN_USER:-admin}"
+      GF_SECURITY_ADMIN_PASSWORD: "${GRAFANA_ADMIN_PASSWORD:-admin}"
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      GF_SERVER_SERVE_FROM_SUB_PATH: "false"
+    volumes:
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./grafana/dashboards:/etc/grafana/provisioning/dashboards:ro
+      - grafana-data:/var/lib/grafana
+    depends_on:
+      prometheus:
+        condition: service_started
+    deploy:
+      resources:
+        limits:
+          cpus: "0.50"
+          memory: 512M
+        reservations:
+          cpus: "0.10"
+          memory: 128M
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:3000/api/health || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 25s
+    networks:
+      - workflow-net
+
+# ── Persistent Storage Volumes ────────────────────────────────────────────────
+# Configured so metrics, dashboards, and alert states survive container recreation
+volumes:
+  prometheus-data:
+    name: workflow-monitoring_prometheus-data
+  grafana-data:
+    name: workflow-monitoring_grafana-data
+  alertmanager-data:
+    name: workflow-monitoring_alertmanager-data
+
+# ── Shared Application Network ────────────────────────────────────────────────
+# Joins the existing saga engine network without assuming 'localhost' between containers
+networks:
+  workflow-net:
+    name: workflow-net
+    driver: bridge

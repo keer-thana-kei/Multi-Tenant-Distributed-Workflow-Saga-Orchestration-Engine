@@ -2,6 +2,7 @@ version: "3.9"
 
 networks:
   workflow-net:
+    name: workflow-net
     driver: bridge
 
 services:
@@ -68,6 +69,7 @@ services:
     volumes:
       - ./Monitoring/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
       - ./Monitoring/alerts/alert_rules.yml:/etc/prometheus/alert_rules.yml:ro
+      - prometheus-data:/prometheus
     command:
       - '--config.file=/etc/prometheus/prometheus.yml'
       - '--storage.tsdb.path=/prometheus'
@@ -93,7 +95,12 @@ services:
     volumes:
       - ./Monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
       - ./Monitoring/grafana/dashboards:/etc/grafana/provisioning/dashboards:ro
+      - grafana-data:/var/lib/grafana
     depends_on:
       - prometheus
     networks:
       - workflow-net
+
+volumes:
+  prometheus-data:
+  grafana-data:

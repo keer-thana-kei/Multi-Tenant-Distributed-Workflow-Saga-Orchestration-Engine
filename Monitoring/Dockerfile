@@ -8,8 +8,9 @@ COPY package*.json ./
 # Install production dependencies only
 RUN npm ci --omit=dev
 
-# Copy application source
+# Copy application source & static dashboard assets
 COPY src ./src
+COPY public ./public
 
 EXPOSE 4000
 
