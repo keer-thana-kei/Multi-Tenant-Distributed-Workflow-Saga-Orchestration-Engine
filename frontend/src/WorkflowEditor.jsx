@@ -1,5 +1,5 @@
 
-import { useCallback, useRef, useState } from 'react';
+import React, { useCallback, useState } from 'react';
 import {
   ReactFlow,
   Background,
@@ -22,67 +22,57 @@ const STORAGE_KEY = 'flowforge-workflows';
 
 const initialNodes = [
   {
-    id: 'start',
+    id: '1',
     type: 'input',
-    position: { x: 100, y: 120 },
-    data: { label: 'Start Workflow', nodeKind: 'start' },
+    position: { x: 100, y: 100 },
+    data: { label: 'Start Workflow' },
   },
   {
-    id: 'task1',
+    id: '2',
     type: 'default',
-    position: { x: 400, y: 120 },
-    data: { label: 'Execute Task', nodeKind: 'task' },
+    position: { x: 350, y: 100 },
+    data: { label: 'Execute Task' },
   },
 ];
 
 const initialEdges = [
   {
-    id: 'start-task1',
-    source: 'start',
-    target: 'task1',
+    id: 'e1-2',
+    source: '1',
+    target: '2',
+    animated: true,
   },
 ];
-
-const nodeLabels = {
-  start: 'Start Workflow',
-  task: 'Execute Task',
-  condition: 'Condition',
-  end: 'End Workflow',
-};
 
 function loadSavedWorkflow(workflowId) {
   try {
     const saved = JSON.parse(
       localStorage.getItem(STORAGE_KEY) || '{}'
     );
-
     return saved[workflowId] || null;
   } catch (error) {
-    console.error('Workflow loading failed:', error);
+    console.error('Failed to load workflow:', error);
     return null;
   }
 }
 
-function saveWorkflow(workflowId, nodes, edges) {
+function saveWorkflow(workflowId, nodes, edges, workflowName) {
   try {
     const saved = JSON.parse(
       localStorage.getItem(STORAGE_KEY) || '{}'
     );
 
     saved[workflowId] = {
+      workflowName: workflowName || 'My Workflow',
       nodes,
       edges,
       updatedAt: new Date().toISOString(),
     };
 
-    localStorage.setItem(
-      STORAGE_KEY,
-      JSON.stringify(saved)
-    );
-
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(saved));
     return true;
   } catch (error) {
-    console.error('Workflow save failed:', error);
+    console.error('Failed to save workflow:', error);
     return false;
   }
 }
@@ -91,7 +81,7 @@ function ConditionNode({ data }) {
   return (
     <div className="condition-node">
       <Handle type="target" position={Position.Left} />
-      <div>{data.label}</div>
+      <div>{data.label || 'Condition'}</div>
       <Handle type="source" position={Position.Right} />
     </div>
   );
@@ -103,14 +93,13 @@ const customNodeTypes = {
 
 function WorkflowCanvas({
   nodes,
-  setNodes,
   edges,
+  setNodes,
   setEdges,
   onNodesChange,
   onEdgesChange,
   onConnect,
   setSaveMessage,
-  reactFlowWrapper,
 }) {
   const { screenToFlowPosition } = useReactFlow();
 
@@ -123,23 +112,17 @@ function WorkflowCanvas({
     (event) => {
       event.preventDefault();
 
-      const nodeKind = event.dataTransfer.getData(
-        'application/reactflow'
-      );
+      const nodeKind = event.dataTransfer.getData('application/reactflow');
 
-      if (!nodeKind || !nodeLabels[nodeKind]) {
-        return;
-      }
+      if (!nodeKind) return;
 
       const position = screenToFlowPosition({
         x: event.clientX,
         y: event.clientY,
       });
 
-      const id = `${nodeKind}-${Date.now()}`;
-
       const newNode = {
-        id,
+        id: `node-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
         type:
           nodeKind === 'start'
             ? 'input'
@@ -150,28 +133,29 @@ function WorkflowCanvas({
                 : 'default',
         position,
         data: {
-          label: nodeLabels[nodeKind],
-          nodeKind,
+          label:
+            nodeKind === 'start'
+              ? 'Start Workflow'
+              : nodeKind === 'task'
+                ? 'Execute Task'
+                : nodeKind === 'condition'
+                  ? 'Check Condition'
+                  : 'End Workflow',
         },
       };
 
-      setNodes((currentNodes) => [
-        ...currentNodes,
-        newNode,
-      ]);
-
+      setNodes((currentNodes) => [...currentNodes, newNode]);
       setSaveMessage('');
     },
     [screenToFlowPosition, setNodes, setSaveMessage]
   );
 
   return (
-    <div className="editor-workspace">
+    <div className="workflow-editor-layout">
       <NodePalette />
 
       <div
         className="workflow-canvas"
-        ref={reactFlowWrapper}
         onDrop={onDrop}
         onDragOver={onDragOver}
       >
@@ -179,14 +163,8 @@ function WorkflowCanvas({
           nodes={nodes}
           edges={edges}
           nodeTypes={customNodeTypes}
-          onNodesChange={(changes) => {
-            onNodesChange(changes);
-            setSaveMessage('');
-          }}
-          onEdgesChange={(changes) => {
-            onEdgesChange(changes);
-            setSaveMessage('');
-          }}
+          onNodesChange={onNodesChange}
+          onEdgesChange={onEdgesChange}
           onConnect={onConnect}
           fitView
         >
@@ -199,138 +177,135 @@ function WorkflowCanvas({
   );
 }
 
-export default function WorkflowEditor({
+function WorkflowEditorContent({
   onBack,
-  workflowId = 'default-workflow',
-  workflowName = 'My Workflow',
+  workflowId,
+  workflowName,
 }) {
-  const [initialWorkflow] = useState(
-    () => loadSavedWorkflow(workflowId)
-  );
+  const savedWorkflow = loadSavedWorkflow(workflowId);
 
   const [nodes, setNodes, onNodesChange] = useNodesState(
-    initialWorkflow?.nodes || initialNodes
+    savedWorkflow?.nodes || initialNodes
   );
 
   const [edges, setEdges, onEdgesChange] = useEdgesState(
-    initialWorkflow?.edges || initialEdges
+    savedWorkflow?.edges || initialEdges
   );
 
   const [nextId, setNextId] = useState(
-    () => (initialWorkflow?.nodes || initialNodes).length + 1
+    Math.max(
+      3,
+      ...((savedWorkflow?.nodes || initialNodes).map(
+        (node) => Number(node.id) || 0
+      ))
+    )
   );
 
   const [saveMessage, setSaveMessage] = useState('');
-  const reactFlowWrapper = useRef(null);
 
   const onConnect = useCallback(
     (connection) => {
       setEdges((currentEdges) =>
-        addEdge(connection, currentEdges)
+        addEdge({ ...connection, animated: true }, currentEdges)
       );
       setSaveMessage('');
     },
     [setEdges]
   );
 
-  const addTask = () => {
-    const id = `task-${Date.now()}`;
-
-    setNodes((currentNodes) => [
-      ...currentNodes,
-      {
-        id,
-        type: 'default',
-        position: {
-          x: 150 + (currentNodes.length % 4) * 180,
-          y: 280 + Math.floor(currentNodes.length / 4) * 120,
-        },
-        data: {
-          label: `Task ${nextId}`,
-          nodeKind: 'task',
-        },
+  function addTaskNode() {
+    const newNode = {
+      id: String(nextId),
+      type: 'default',
+      position: {
+        x: 150 + Math.random() * 250,
+        y: 200 + Math.random() * 150,
       },
-    ]);
+      data: { label: 'New Task' },
+    };
 
-    setNextId((current) => current + 1);
+    setNodes((currentNodes) => [...currentNodes, newNode]);
+    setNextId((currentId) => currentId + 1);
     setSaveMessage('');
-  };
+  }
 
-  const handleSave = () => {
+  function handleSave() {
     const success = saveWorkflow(
       workflowId,
       nodes,
-      edges
+      edges,
+      workflowName
     );
 
     setSaveMessage(
       success
         ? 'Workflow saved successfully!'
-        : 'Could not save. Check browser storage.'
+        : 'Unable to save. Check browser storage and try again.'
     );
-  };
+  }
 
   return (
-    <main className="editor-page">
-      <header className="editor-header">
-        <button
-          className="editor-back"
-          onClick={onBack}
-        >
-          ← Dashboard
-        </button>
-
-        <div className="editor-heading">
-          <h1>Workflow Editor</h1>
-          <p>
-            Editing {workflowName}. Add nodes and connect
-            them to design your workflow.
-          </p>
+    <section className="workflow-editor-page">
+      <header className="editor-toolbar">
+        <div>
+          <button type="button" onClick={onBack}>
+            ← Back to Dashboard
+          </button>
+          <h1>{workflowName || 'My Workflow'}</h1>
+          <p>Design your workflow by dragging nodes and connecting them.</p>
         </div>
 
         <div className="editor-actions">
+          <button type="button" onClick={addTaskNode}>
+            + Add Task
+          </button>
           <button
-            className="editor-save"
+            type="button"
+            className="editor-save-button"
             onClick={handleSave}
           >
             Save Workflow
           </button>
-
-          <button
-            className="editor-add"
-            onClick={addTask}
-          >
-            + Add Task
-          </button>
         </div>
       </header>
 
-      {saveMessage && (
-        <p className="save-message" role="status">
-          {saveMessage}
-        </p>
-      )}
-
-      <div className="editor-toolbar">
-        <span>WORKFLOW CANVAS</span>
-        <span>
-          {nodes.length} nodes · {edges.length} connections
-        </span>
+      <div className="editor-summary">
+        <span>Nodes: {nodes.length}</span>
+        <span>Connections: {edges.length}</span>
+        {saveMessage && (
+          <span role="status" className="save-message">
+            {saveMessage}
+          </span>
+        )}
       </div>
 
       <ReactFlowProvider>
         <WorkflowCanvas
           nodes={nodes}
-          setNodes={setNodes}
           edges={edges}
+          setNodes={setNodes}
           setEdges={setEdges}
           onNodesChange={onNodesChange}
           onEdgesChange={onEdgesChange}
           onConnect={onConnect}
           setSaveMessage={setSaveMessage}
-          reactFlowWrapper={reactFlowWrapper}
         />
       </ReactFlowProvider>
-    </main>
+    </section>
+  );
+}
+
+export default function WorkflowEditor({
+  onBack,
+  workflowId = 'default-workflow',
+  workflowName = 'My Workflow',
+}) {
+  return (
+    <WorkflowEditorContent
+      key={workflowId}
+      onBack={onBack}
+      workflowId={workflowId}
+      workflowName={workflowName}
+    />
   );
 }
