@@ -3,6 +3,7 @@
 const mongoose = require('mongoose');
 const http = require('http');
 const url = require('url');
+const { getWorkflowModel } = require('../metrics/collector');
 
 const BACKEND_URL = process.env.BACKEND_URL || 'http://localhost:5000';
 
@@ -108,7 +109,7 @@ async function checkWorkers() {
   const STALL_MINUTES = parseInt(process.env.WORKER_STALL_MINUTES || '10', 10);
 
   try {
-    const Workflow = mongoose.model('Workflow');
+    const Workflow = getWorkflowModel();
     const stalledCutoff = new Date(Date.now() - STALL_MINUTES * 60 * 1000);
     const stalledCount = await Workflow.countDocuments({
       status: 'running',

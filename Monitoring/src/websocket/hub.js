@@ -31,6 +31,7 @@ const jwt = require('jsonwebtoken');
 const logger = require('../logger');
 const { TYPES, createEvent } = require('./schema');
 const sagaAdapter = require('./adapter');
+const { getWorkflowModel } = require('../metrics/collector');
 
 // ── Config ────────────────────────────────────────────────────────────────────
 const ALLOWED_ORIGINS_RAW      = process.env.ALLOWED_WS_ORIGINS       || '*';
@@ -350,6 +351,7 @@ let _changeStream = null;
 let _changeStreamActive = false;
 let _fallbackInterval = null;
 let _lastPollTime = new Date();
+let _lastPollError = null;
 
 function startChangeStream() {
   if (mongoose.connection.readyState !== 1) {
@@ -358,7 +360,7 @@ function startChangeStream() {
   }
 
   try {
-    const Workflow = mongoose.model('Workflow');
+    const Workflow = getWorkflowModel();
     _changeStream = Workflow.watch([], { fullDocument: 'updateLookup' });
     _changeStreamActive = true;
 
@@ -424,10 +426,11 @@ function startFallbackPolling() {
     if (mongoose.connection.readyState !== 1) return;
 
     try {
-      const Workflow = mongoose.model('Workflow');
+      const Workflow = getWorkflowModel();
       const since = _lastPollTime;
       _lastPollTime = new Date();
       const docs = await Workflow.find({ updatedAt: { $gt: since } }).limit(50).lean();
+      _lastPollError = null;
 
       for (const doc of docs) {
         const tenantId = doc.companyId || null;
@@ -462,7 +465,10 @@ function startFallbackPolling() {
         }
       }
     } catch (err) {
-      logger.error('WS Hub: fallback poll error (safe, non-fatal)', { error: err.message });
+      if (_lastPollError !== err.message) {
+        _lastPollError = err.message;
+        logger.error('WS Hub: fallback poll error (safe, non-fatal)', { error: err.message });
+      }
     }
   }, WS_POLL_INTERVAL_MS);
   if (_fallbackInterval.unref) _fallbackInterval.unref();
