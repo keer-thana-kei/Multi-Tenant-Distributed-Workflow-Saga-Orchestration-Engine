@@ -65,6 +65,12 @@ app.use('/metrics', metricsRoutes);
 app.use('/alerts', alertsRoutes);
 app.use('/api/status', statusRoutes);
 
+// Static files & Standalone Dashboard
+app.use('/public', express.static(path.join(__dirname, '..', 'public')));
+app.get('/dashboard', (_req, res) => {
+  res.sendFile(path.join(__dirname, '..', 'public', 'index.html'));
+});
+
 app.get('/', (_req, res) => {
   res.json({ service: 'monitoring', status: 'running', port: PORT });
 });

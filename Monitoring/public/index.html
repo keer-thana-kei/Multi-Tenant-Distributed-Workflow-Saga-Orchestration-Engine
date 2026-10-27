@@ -1,0 +1,729 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Saga Orchestrator — Live Monitoring Dashboard</title>
+  <style>
+    :root {
+      --bg-base: #0f172a;
+      --bg-surface: #1e293b;
+      --bg-card: #243248;
+      --text-main: #f8fafc;
+      --text-muted: #94a3b8;
+      --border-color: #334155;
+      --status-healthy: #10b981;
+      --status-degraded: #f59e0b;
+      --status-down: #ef4444;
+      --status-unknown: #6b7280;
+      --accent-blue: #3b82f6;
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      background-color: var(--bg-base);
+      color: var(--text-main);
+      padding: 1.5rem;
+      line-height: 1.5;
+    }
+
+    header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 1rem;
+      margin-bottom: 1.5rem;
+      padding-bottom: 1rem;
+      border-bottom: 1px solid var(--border-color);
+    }
+
+    h1 { font-size: 1.5rem; font-weight: 700; display: flex; align-items: center; gap: 0.75rem; }
+    .header-meta { display: flex; align-items: center; gap: 1rem; font-size: 0.875rem; color: var(--text-muted); }
+
+    /* Stale Data Warning Banner */
+    #staleBanner {
+      display: none;
+      background: #78350f;
+      color: #fef3c7;
+      border: 1px solid #b45309;
+      padding: 0.75rem 1rem;
+      border-radius: 6px;
+      margin-bottom: 1.5rem;
+      font-weight: 500;
+      align-items: center;
+      gap: 0.5rem;
+    }
+    #staleBanner.visible { display: flex; }
+
+    /* Transport Status Badge */
+    .transport-pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.4rem;
+      padding: 0.25rem 0.6rem;
+      border-radius: 9999px;
+      font-size: 0.75rem;
+      font-weight: 600;
+      text-transform: uppercase;
+    }
+    .transport-connected { background: #064e3b; color: #6ee7b7; border: 1px solid #047857; }
+    .transport-disconnected { background: #7f1d1d; color: #fca5a5; border: 1px solid #b91c1c; }
+    .transport-reconnecting { background: #78350f; color: #fde68a; border: 1px solid #d97706; }
+
+    /* Status Dot */
+    .status-dot {
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+      display: inline-block;
+    }
+    .dot-healthy { background: var(--status-healthy); box-shadow: 0 0 8px var(--status-healthy); }
+    .dot-degraded { background: var(--status-degraded); box-shadow: 0 0 8px var(--status-degraded); }
+    .dot-down { background: var(--status-down); box-shadow: 0 0 8px var(--status-down); }
+    .dot-unknown { background: var(--status-unknown); }
+
+    /* Grid Layouts */
+    .grid-metrics {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+      gap: 1rem;
+      margin-bottom: 1.5rem;
+    }
+
+    .card {
+      background: var(--bg-surface);
+      border: 1px solid var(--border-color);
+      border-radius: 8px;
+      padding: 1.25rem;
+      position: relative;
+    }
+
+    .card-title {
+      font-size: 0.8125rem;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      color: var(--text-muted);
+      margin-bottom: 0.5rem;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    .card-value {
+      font-size: 1.75rem;
+      font-weight: 700;
+      display: flex;
+      align-items: baseline;
+      gap: 0.4rem;
+    }
+
+    .card-subtitle {
+      font-size: 0.75rem;
+      color: var(--text-muted);
+      margin-top: 0.25rem;
+    }
+
+    .stale-tag {
+      font-size: 0.7rem;
+      color: var(--status-degraded);
+      font-weight: normal;
+    }
+
+    /* Service Health Grid */
+    .services-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+      gap: 1rem;
+      margin-bottom: 1.5rem;
+    }
+
+    .service-card {
+      background: var(--bg-surface);
+      border: 1px solid var(--border-color);
+      border-radius: 8px;
+      padding: 1rem;
+      display: flex;
+      flex-direction: column;
+      gap: 0.5rem;
+    }
+
+    .service-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    .service-name { font-weight: 600; font-size: 0.95rem; }
+    .service-status-text {
+      font-size: 0.75rem;
+      font-weight: 700;
+      padding: 0.15rem 0.5rem;
+      border-radius: 4px;
+      text-transform: uppercase;
+    }
+    .status-text-healthy { color: var(--status-healthy); background: rgba(16, 185, 129, 0.1); }
+    .status-text-degraded { color: var(--status-degraded); background: rgba(245, 158, 11, 0.1); }
+    .status-text-down { color: var(--status-down); background: rgba(239, 68, 68, 0.1); }
+    .status-text-unknown { color: var(--status-unknown); background: rgba(107, 114, 128, 0.1); }
+
+    .service-detail { font-size: 0.8rem; color: var(--text-muted); }
+
+    /* Filters Bar */
+    .filter-bar {
+      background: var(--bg-surface);
+      border: 1px solid var(--border-color);
+      border-radius: 8px;
+      padding: 1rem;
+      margin-bottom: 1.5rem;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 1rem;
+      align-items: center;
+    }
+
+    .filter-group { display: flex; align-items: center; gap: 0.5rem; font-size: 0.8125rem; }
+    .filter-group label { color: var(--text-muted); }
+    .filter-select, .filter-input {
+      background: var(--bg-base);
+      color: var(--text-main);
+      border: 1px solid var(--border-color);
+      padding: 0.35rem 0.6rem;
+      border-radius: 4px;
+      font-size: 0.8125rem;
+      outline: none;
+    }
+    .filter-select:focus, .filter-input:focus { border-color: var(--accent-blue); }
+
+    /* Timeline Table */
+    .timeline-container {
+      background: var(--bg-surface);
+      border: 1px solid var(--border-color);
+      border-radius: 8px;
+      overflow: hidden;
+    }
+
+    .timeline-header {
+      padding: 1rem;
+      font-weight: 600;
+      border-bottom: 1px solid var(--border-color);
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    table { width: 100%; border-collapse: collapse; text-align: left; font-size: 0.8125rem; }
+    th { padding: 0.75rem 1rem; color: var(--text-muted); font-weight: 600; border-bottom: 1px solid var(--border-color); background: rgba(0,0,0,0.1); }
+    td { padding: 0.75rem 1rem; border-bottom: 1px solid var(--border-color); }
+    tr:last-child td { border-bottom: none; }
+    tr:hover { background: rgba(255,255,255,0.02); }
+
+    .event-type-badge {
+      display: inline-block;
+      padding: 0.15rem 0.45rem;
+      border-radius: 4px;
+      font-size: 0.7rem;
+      font-weight: 600;
+      font-family: monospace;
+    }
+    .badge-info { background: #1e3a8a; color: #93c5fd; }
+    .badge-warn { background: #78350f; color: #fde68a; }
+    .badge-error { background: #7f1d1d; color: #fca5a5; }
+
+    /* Footer */
+    footer {
+      margin-top: 2rem;
+      padding-top: 1rem;
+      border-top: 1px solid var(--border-color);
+      font-size: 0.75rem;
+      color: var(--text-muted);
+      display: flex;
+      justify-content: space-between;
+      flex-wrap: wrap;
+      gap: 0.5rem;
+    }
+  </style>
+</head>
+<body>
+
+  <!-- Stale Data Warning Banner -->
+  <div id="staleBanner" role="alert" aria-live="assertive">
+    <span class="status-dot dot-degraded"></span>
+    <span id="staleMessage">Transport disconnected. Displaying cached state. Reconnecting...</span>
+  </div>
+
+  <!-- Header -->
+  <header>
+    <div>
+      <h1>
+        <span class="status-dot dot-unknown" id="overallHeaderDot" aria-hidden="true"></span>
+        Saga Orchestration Monitoring
+      </h1>
+      <div class="card-subtitle">Real-time system health, workflow saga telemetry, and infrastructure observability</div>
+    </div>
+    <div class="header-meta">
+      <div>WebSocket: <span id="transportBadge" class="transport-pill transport-disconnected" aria-label="WebSocket Transport Status">Disconnected</span></div>
+      <div>Auth: <span id="authBadge" class="card-subtitle" style="color: #60a5fa;">Admin API Key</span></div>
+    </div>
+  </header>
+
+  <!-- Service Health Section -->
+  <section aria-labelledby="section-services-title">
+    <div class="card-title" id="section-services-title">Monitored Services & Dependency Health</div>
+    <div class="services-grid" id="servicesGrid">
+      <!-- Populated dynamically with accessible semantics -->
+    </div>
+  </section>
+
+  <!-- Core Metric Counters & Telemetry -->
+  <section aria-labelledby="section-metrics-title">
+    <div class="card-title" id="section-metrics-title">Workflow Engine Metrics & System Telemetry</div>
+    <div class="grid-metrics">
+      <div class="card" aria-label="Workflow Queue Depth">
+        <div class="card-title">Pending Workflows (Queue Depth)</div>
+        <div class="card-value" id="valQueueDepth">--</div>
+        <div class="card-subtitle" id="subQueueDepth">Awaiting executor</div>
+      </div>
+      <div class="card" aria-label="Active Running Workflows">
+        <div class="card-title">Active Running Sagas</div>
+        <div class="card-value" style="color: #60a5fa;" id="valRunning">--</div>
+        <div class="card-subtitle" id="subRunning">Currently executing</div>
+      </div>
+      <div class="card" aria-label="Successful Workflows">
+        <div class="card-title">Completed Workflows</div>
+        <div class="card-value" style="color: var(--status-healthy);" id="valSuccess">--</div>
+        <div class="card-subtitle" id="subSuccess">Saga success</div>
+      </div>
+      <div class="card" aria-label="Failed Workflows">
+        <div class="card-title">Failed Workflows</div>
+        <div class="card-value" style="color: var(--status-down);" id="valFailed">--</div>
+        <div class="card-subtitle" id="subFailed">Failed / Compensated</div>
+      </div>
+      <div class="card" aria-label="Saga Compensation Failures">
+        <div class="card-title">Compensation Failures</div>
+        <div class="card-value" style="color: #f87171;" id="valCompFailures">0</div>
+        <div class="card-subtitle">Critical rollback errors</div>
+      </div>
+      <div class="card" aria-label="CPU Utilization">
+        <div class="card-title">Host CPU Usage</div>
+        <div class="card-value" id="valCpu">--%</div>
+        <div class="card-subtitle" id="subCpu">System load</div>
+      </div>
+      <div class="card" aria-label="Memory Utilization">
+        <div class="card-title">Host Memory Usage</div>
+        <div class="card-value" id="valMem">--%</div>
+        <div class="card-subtitle" id="subMem">RAM utilization</div>
+      </div>
+      <div class="card" aria-label="Infrastructure Environment">
+        <div class="card-title">Environment & Runtime</div>
+        <div class="card-value" style="font-size: 1.1rem;" id="valEnv">Node.js Host</div>
+        <div class="card-subtitle" id="subEnv">Observable runtime</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Interactive Filters -->
+  <section class="filter-bar" aria-label="Timeline Filters">
+    <div class="filter-group">
+      <label for="filterService">Service:</label>
+      <select id="filterService" class="filter-select">
+        <option value="all">All Services</option>
+        <option value="api">Backend API</option>
+        <option value="mongodb">MongoDB</option>
+        <option value="workers">Workers</option>
+        <option value="mongodb-dns">MongoDB DNS</option>
+      </select>
+    </div>
+    <div class="filter-group">
+      <label for="filterStatus">Status:</label>
+      <select id="filterStatus" class="filter-select">
+        <option value="all">All Statuses</option>
+        <option value="healthy">Healthy</option>
+        <option value="degraded">Degraded</option>
+        <option value="down">Down</option>
+      </select>
+    </div>
+    <div class="filter-group">
+      <label for="filterType">Event Type:</label>
+      <select id="filterType" class="filter-select">
+        <option value="all">All Events</option>
+        <option value="WORKFLOW_STARTED">WORKFLOW_STARTED</option>
+        <option value="WORKFLOW_STEP_SUCCESS">WORKFLOW_STEP_SUCCESS</option>
+        <option value="WORKFLOW_STEP_FAILED">WORKFLOW_STEP_FAILED</option>
+        <option value="WORKFLOW_STEP_RETRY">WORKFLOW_STEP_RETRY</option>
+        <option value="WORKFLOW_COMPENSATING">WORKFLOW_COMPENSATING</option>
+        <option value="WORKFLOW_COMPENSATION_FAILED">WORKFLOW_COMPENSATION_FAILED</option>
+        <option value="WORKFLOW_COMPLETED">WORKFLOW_COMPLETED</option>
+        <option value="SYSTEM_HEALTH">SYSTEM_HEALTH</option>
+        <option value="ALERT_FIRED">ALERT_FIRED</option>
+      </select>
+    </div>
+    <div class="filter-group">
+      <label for="filterTenant">Tenant:</label>
+      <input type="text" id="filterTenant" class="filter-input" placeholder="Filter companyId..." />
+    </div>
+  </section>
+
+  <!-- Recent Events Timeline -->
+  <section class="timeline-container" aria-label="Recent Events Timeline">
+    <div class="timeline-header">
+      <span>Recent Saga Lifecycle & Infrastructure Events</span>
+      <span style="font-size: 0.75rem; color: var(--text-muted);" id="eventCountBadge">0 events</span>
+    </div>
+    <table>
+      <thead>
+        <tr>
+          <th>Time</th>
+          <th>Type</th>
+          <th>Severity</th>
+          <th>Tenant Scope</th>
+          <th>Entity / Details</th>
+          <th>Seq</th>
+        </tr>
+      </thead>
+      <tbody id="timelineBody">
+        <tr>
+          <td colspan="6" style="text-align: center; color: var(--text-muted); padding: 2rem;">
+            Waiting for live telemetry events...
+          </td>
+        </tr>
+      </tbody>
+    </table>
+  </section>
+
+  <!-- Footer with Server Timestamps -->
+  <footer>
+    <div>Last Successful Health Check: <span id="lastHealthTime" style="color: var(--text-main);">--</span></div>
+    <div>Last Data Update: <span id="lastDataTime" style="color: var(--text-main);">--</span></div>
+    <div>Server Sync: Monotonic Sequence <span id="lastSeqVal" style="color: var(--text-main);">0</span></div>
+  </footer>
+
+  <script>
+    (function () {
+      'use strict';
+
+      // ── State ─────────────────────────────────────────────────────────────
+      let ws = null;
+      let reconnectAttempts = 0;
+      let reconnectTimer = null;
+      let lastSeenSeq = -1;
+      let lastHealthCheckTime = null;
+      let lastDataUpdateTime = null;
+      let isStale = false;
+      let eventHistory = [];
+
+      // UI Elements
+      const staleBanner = document.getElementById('staleBanner');
+      const staleMessage = document.getElementById('staleMessage');
+      const transportBadge = document.getElementById('transportBadge');
+      const overallHeaderDot = document.getElementById('overallHeaderDot');
+      const servicesGrid = document.getElementById('servicesGrid');
+      const timelineBody = document.getElementById('timelineBody');
+      const eventCountBadge = document.getElementById('eventCountBadge');
+      const lastHealthTimeEl = document.getElementById('lastHealthTime');
+      const lastDataTimeEl = document.getElementById('lastDataTime');
+      const lastSeqEl = document.getElementById('lastSeqVal');
+
+      const filterService = document.getElementById('filterService');
+      const filterStatus = document.getElementById('filterStatus');
+      const filterType = document.getElementById('filterType');
+      const filterTenant = document.getElementById('filterTenant');
+
+      // ── Status Semantics Helpers ──────────────────────────────────────────
+      function getStatusColorClass(status) {
+        switch (status?.toLowerCase()) {
+          case 'healthy': return 'status-text-healthy';
+          case 'degraded': return 'status-text-degraded';
+          case 'down': return 'status-text-down';
+          default: return 'status-text-unknown';
+        }
+      }
+
+      function getDotClass(status) {
+        switch (status?.toLowerCase()) {
+          case 'healthy': return 'dot-healthy';
+          case 'degraded': return 'dot-degraded';
+          case 'down': return 'dot-down';
+          default: return 'dot-unknown';
+        }
+      }
+
+      function formatTimestamp(isoStr) {
+        if (!isoStr) return '--';
+        try {
+          const d = new Date(isoStr);
+          return d.toLocaleTimeString([], { hour12: false }) + '.' + String(d.getMilliseconds()).padStart(3, '0');
+        } catch {
+          return isoStr;
+        }
+      }
+
+      // ── Initial HTTP Fetch ────────────────────────────────────────────────
+      async function fetchInitialStatus() {
+        try {
+          const res = await fetch('/api/status', {
+            headers: { 'X-Monitoring-Key': 'dev-monitoring-key-change-me' }
+          });
+          if (!res.ok) throw new Error('HTTP ' + res.status);
+          const data = await res.json();
+          renderFullState(data);
+        } catch (err) {
+          console.warn('Initial fetch failed, awaiting WebSocket snapshot:', err.message);
+        }
+      }
+
+      // ── Render Helpers ────────────────────────────────────────────────────
+      function renderServices(services) {
+        if (!Array.isArray(services)) return;
+        servicesGrid.innerHTML = '';
+
+        services.forEach(svc => {
+          const card = document.createElement('div');
+          card.className = 'service-card';
+          card.setAttribute('role', 'region');
+          card.setAttribute('aria-label', `${svc.name} Service Status: ${svc.status || 'unknown'}`);
+
+          const header = document.createElement('div');
+          header.className = 'service-header';
+
+          const nameSpan = document.createElement('div');
+          nameSpan.className = 'service-name';
+          nameSpan.innerHTML = `<span class="status-dot ${getDotClass(svc.status)}"></span> ${svc.name}`;
+
+          const statusBadge = document.createElement('span');
+          statusBadge.className = `service-status-text ${getStatusColorClass(svc.status)}`;
+          statusBadge.textContent = svc.status || 'UNKNOWN';
+
+          header.appendChild(nameSpan);
+          header.appendChild(statusBadge);
+
+          const detail = document.createElement('div');
+          detail.className = 'service-detail';
+          const latency = svc.latencyMs !== undefined ? `${svc.latencyMs}ms` : '';
+          const info = svc.detail ? ` — ${svc.detail}` : '';
+          detail.textContent = latency ? `${latency}${info}` : (svc.detail || 'No telemetry detail');
+
+          card.appendChild(header);
+          card.appendChild(detail);
+          servicesGrid.appendChild(card);
+        });
+      }
+
+      function renderMetrics(metrics) {
+        if (!metrics) return;
+
+        const staleSuffix = isStale ? ' <span class="stale-tag">(stale)</span>' : '';
+
+        // Workflow counts
+        if (metrics.workflows) {
+          const g = metrics.workflows.global || metrics.workflows;
+          document.getElementById('valQueueDepth').innerHTML = (g.pending ?? '--') + staleSuffix;
+          document.getElementById('valRunning').innerHTML = (g.running ?? '--') + staleSuffix;
+          document.getElementById('valSuccess').innerHTML = (g.success ?? '--') + staleSuffix;
+          document.getElementById('valFailed').innerHTML = (g.failed ?? '--') + staleSuffix;
+        }
+
+        // System CPU / Memory
+        if (metrics.system) {
+          const cpu = metrics.system.cpu?.usagePercent;
+          const mem = metrics.system.memory?.usagePercent;
+          document.getElementById('valCpu').innerHTML = (cpu !== undefined ? cpu + '%' : '--%') + staleSuffix;
+          document.getElementById('valMem').innerHTML = (mem !== undefined ? mem + '%' : '--%') + staleSuffix;
+        }
+      }
+
+      function renderFullState(data) {
+        if (!data) return;
+
+        if (data.overall) {
+          overallHeaderDot.className = `status-dot ${getDotClass(data.overall)}`;
+        }
+        if (data.services) {
+          renderServices(data.services);
+        }
+        if (data.health) {
+          renderServices(data.health);
+        }
+        if (data.metrics) {
+          renderMetrics(data.metrics);
+        }
+        if (data.checkedAt) {
+          lastHealthCheckTime = data.checkedAt;
+          lastHealthTimeEl.textContent = formatTimestamp(data.checkedAt);
+        }
+      }
+
+      // ── Event Timeline Rendering & Filtering ──────────────────────────────
+      function addTimelineEvent(event) {
+        // Prevent out-of-order duplicates
+        if (event.seq !== 0 && event.seq <= lastSeenSeq) {
+          return; // Out of order frame
+        }
+        if (event.seq > 0) lastSeenSeq = event.seq;
+        lastSeqEl.textContent = lastSeenSeq;
+
+        eventHistory.unshift(event);
+        if (eventHistory.length > 200) eventHistory.pop();
+        renderTimeline();
+      }
+
+      function renderTimeline() {
+        const sFilter = filterService.value;
+        const stFilter = filterStatus.value;
+        const tFilter = filterType.value;
+        const tenFilter = filterTenant.value.trim().toLowerCase();
+
+        const filtered = eventHistory.filter(ev => {
+          if (tFilter !== 'all' && ev.type !== tFilter) return false;
+          if (tenFilter && (!ev.tenantId || !ev.tenantId.toLowerCase().includes(tenFilter))) return false;
+          return true;
+        });
+
+        eventCountBadge.textContent = `${filtered.length} events`;
+
+        if (filtered.length === 0) {
+          timelineBody.innerHTML = `<tr><td colspan="6" style="text-align: center; color: var(--text-muted); padding: 1.5rem;">No matching events</td></tr>`;
+          return;
+        }
+
+        timelineBody.innerHTML = filtered.slice(0, 50).map(ev => {
+          const p = ev.payload || {};
+          let badgeClass = 'badge-info';
+          if (ev.severity === 'warn') badgeClass = 'badge-warn';
+          if (ev.severity === 'error' || ev.severity === 'critical') badgeClass = 'badge-error';
+
+          const details = p.stepName
+            ? `Step: ${p.stepName} (${p.stepStatus || ''})`
+            : (p.workflowName ? `Workflow: ${p.workflowName} (${p.status || ''})` : (p.message || JSON.stringify(p)));
+
+          return `
+            <tr>
+              <td style="color: var(--text-muted);">${formatTimestamp(ev.ts)}</td>
+              <td><span class="event-type-badge ${badgeClass}">${ev.type}</span></td>
+              <td style="text-transform: uppercase; font-size: 0.7rem; font-weight: 600;">${ev.severity || 'info'}</td>
+              <td>${ev.tenantId ? `<span style="color: #60a5fa;">${ev.tenantId}</span>` : '<span style="color: var(--text-muted);">system-wide</span>'}</td>
+              <td>${details}</td>
+              <td style="color: var(--text-muted);">${ev.seq}</td>
+            </tr>
+          `;
+        }).join('');
+      }
+
+      [filterService, filterStatus, filterType, filterTenant].forEach(el => {
+        el.addEventListener('change', renderTimeline);
+        el.addEventListener('input', renderTimeline);
+      });
+
+      // ── WebSocket Client with Exponential Backoff + Jitter ────────────────
+      function connectWebSocket() {
+        if (ws) {
+          try { ws.close(); } catch {}
+        }
+
+        const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+        const host = window.location.host || 'localhost:4000';
+        const wsUrl = `${protocol}//${host}/?apiKey=dev-monitoring-key-change-me`;
+
+        transportBadge.className = 'transport-pill transport-reconnecting';
+        transportBadge.textContent = reconnectAttempts > 0 ? `Reconnecting (${reconnectAttempts})...` : 'Connecting...';
+
+        try {
+          ws = new WebSocket(wsUrl);
+        } catch (err) {
+          scheduleReconnect();
+          return;
+        }
+
+        ws.onopen = function () {
+          console.log('Monitoring WS connected');
+          reconnectAttempts = 0;
+          isStale = false;
+          staleBanner.classList.remove('visible');
+          transportBadge.className = 'transport-pill transport-connected';
+          transportBadge.textContent = 'Connected';
+        };
+
+        ws.onmessage = function (event) {
+          try {
+            const msg = JSON.parse(event.data);
+            handleIncomingEvent(msg);
+          } catch (err) {
+            console.warn('Malformed WS message frame ignored');
+          }
+        };
+
+        ws.onclose = function () {
+          handleDisconnect();
+        };
+
+        ws.onerror = function () {
+          handleDisconnect();
+        };
+      }
+
+      function handleDisconnect() {
+        if (!isStale) {
+          isStale = true;
+          staleBanner.classList.add('visible');
+          staleMessage.textContent = `Transport disconnected at ${new Date().toLocaleTimeString()}. Displaying cached data. Reconnection in progress...`;
+          transportBadge.className = 'transport-pill transport-disconnected';
+          transportBadge.textContent = 'Disconnected';
+          // Re-render metrics with stale markers
+          fetchInitialStatus();
+        }
+        scheduleReconnect();
+      }
+
+      function scheduleReconnect() {
+        if (reconnectTimer) clearTimeout(reconnectTimer);
+        reconnectAttempts++;
+
+        // Bounded exponential backoff with random jitter (1s - 15s)
+        const baseDelay = Math.min(1000 * Math.pow(1.5, reconnectAttempts), 15000);
+        const jitter = Math.random() * 500;
+        const delay = Math.floor(baseDelay + jitter);
+
+        reconnectTimer = setTimeout(connectWebSocket, delay);
+      }
+
+      function handleIncomingEvent(msg) {
+        lastDataUpdateTime = msg.ts || new Date().toISOString();
+        lastDataTimeEl.textContent = formatTimestamp(lastDataUpdateTime);
+
+        // Process message types
+        if (msg.type === 'SNAPSHOT') {
+          // Authoritative full snapshot (seq: 0)
+          lastSeenSeq = 0;
+          renderFullState(msg.payload);
+        } else if (msg.type === 'SYSTEM_HEALTH') {
+          lastHealthCheckTime = msg.ts;
+          lastHealthTimeEl.textContent = formatTimestamp(msg.ts);
+          if (msg.payload?.services) {
+            renderServices(msg.payload.services);
+          }
+        } else if (msg.type === 'METRICS_UPDATE') {
+          renderMetrics(msg.payload);
+        } else if (msg.type === 'WORKER_AVAILABILITY') {
+          const status = msg.payload?.status;
+          document.getElementById('subRunning').textContent = `Workers: ${status || 'healthy'}`;
+        } else if (msg.type === 'QUEUE_BACKLOG') {
+          if (typeof msg.payload?.pending === 'number') {
+            document.getElementById('valQueueDepth').textContent = msg.payload.pending;
+          }
+        } else if (msg.type === 'WORKFLOW_COMPENSATION_FAILED') {
+          const cur = parseInt(document.getElementById('valCompFailures').textContent || '0', 10);
+          document.getElementById('valCompFailures').textContent = cur + 1;
+        }
+
+        // Add to timeline
+        addTimelineEvent(msg);
+      }
+
+      // Initialize
+      fetchInitialStatus();
+      connectWebSocket();
+    })();
+  </script>
+</body>
+</html>
