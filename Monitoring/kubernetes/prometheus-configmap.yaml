@@ -1,0 +1,183 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: prometheus-config
+  namespace: workflow-engine
+  labels:
+    app.kubernetes.io/name: workflow-prometheus
+    app.kubernetes.io/component: metrics-engine
+    app.kubernetes.io/part-of: workflow-saga-engine
+data:
+  prometheus.yml: |
+    global:
+      scrape_interval: 15s
+      evaluation_interval: 15s
+      scrape_timeout: 10s
+
+    alerting:
+      alertmanagers:
+        - scheme: http
+          timeout: 10s
+          static_configs:
+            - targets:
+                - 'workflow-alertmanager-svc.workflow-engine.svc.cluster.local:9093'
+                - 'workflow-alertmanager-svc:9093'
+
+    rule_files:
+      - '/etc/prometheus/alert_rules.yml'
+
+    scrape_configs:
+      - job_name: 'monitoring-service'
+        metrics_path: '/metrics'
+        scheme: http
+        params:
+          format: ['prometheus']
+        authorization:
+          type: 'Bearer'
+          credentials: 'wf-engine-s3cr3t-jwt-k3y-change-in-production'
+        static_configs:
+          - targets:
+              - 'workflow-monitoring-svc.workflow-engine.svc.cluster.local:4000'
+              - 'workflow-monitoring-svc:4000'
+            labels:
+              environment: 'kubernetes'
+              service: 'monitoring-service'
+              app: 'saga-orchestrator'
+
+      - job_name: 'workflow-backend'
+        metrics_path: '/health'
+        scheme: http
+        scrape_interval: 15s
+        scrape_timeout: 5s
+        static_configs:
+          - targets:
+              - 'workflow-backend-svc.workflow-engine.svc.cluster.local:5000'
+              - 'workflow-backend-svc:5000'
+            labels:
+              environment: 'kubernetes'
+              service: 'workflow-backend'
+              app: 'saga-orchestrator'
+
+  alert_rules.yml: |
+    groups:
+      - name: saga_engine_service_alerts
+        rules:
+          - alert: BackendUnavailable
+            expr: health_check_failures_total{service="api"} > 2 or probe_success{job="workflow-backend"} == 0
+            for: 1m
+            labels:
+              severity: critical
+              service: backend
+              tier: core
+            annotations:
+              summary: "Workflow Backend API is unavailable"
+              description: "Backend service on port 5000 is unreachable or failing health checks."
+              remediation: "Inspect backend pod logs, verify port 5000 availability, and check database connectivity."
+
+          - alert: DatabaseConnectionFailed
+            expr: database_connection_status == 0 or health_check_failures_total{service="mongodb"} > 0
+            for: 30s
+            labels:
+              severity: critical
+              service: mongodb
+              tier: data
+            annotations:
+              summary: "MongoDB connection is down or degraded"
+              description: "Mongoose readyState is not connected (1). Workflow writes are blocked."
+              remediation: "Verify MONGODB_URI secret, check Atlas health, firewall rules, and DNS resolution."
+
+          - alert: WorkerUnavailable
+            expr: worker_availability_status == 0
+            for: 2m
+            labels:
+              severity: critical
+              service: worker
+              tier: engine
+            annotations:
+              summary: "Saga workers are stalled or unavailable"
+              description: "Workflows in 'running' state exceed stall timeout (10 min)."
+              remediation: "Inspect worker logs for execution deadlocks, restart stalled pods, and inspect stuck workflows."
+
+          - alert: HighHttpErrorRate
+            expr: (rate(http_requests_total{status_code=~"5.."}[5m]) / (rate(http_requests_total[5m]) + 0.0001)) > 0.05
+            for: 2m
+            labels:
+              severity: warning
+              service: http
+              tier: api
+            annotations:
+              summary: "HTTP 5xx error rate exceeds 5%"
+              description: "Over 5% of HTTP requests returned 5xx server errors during the last 5 minutes."
+              remediation: "Check application error logs for unhandled 500 exceptions and review recent deployments."
+
+          - alert: ExcessiveRequestLatency
+            expr: histogram_quantile(0.95, sum(rate(http_request_duration_seconds_bucket[5m])) by (le)) > 2.0
+            for: 3m
+            labels:
+              severity: warning
+              service: http
+              tier: api
+            annotations:
+              summary: "P95 HTTP request latency exceeds 2 seconds"
+              description: "95th percentile request latency has remained above 2.0s for over 3 minutes."
+              remediation: "Investigate database query performance and check pod CPU/memory saturation."
+
+          - alert: WorkflowFailureSpike
+            expr: (rate(workflow_lifecycle_total{status="failed"}[15m]) / (rate(workflow_lifecycle_total[15m]) + 0.0001)) > 0.30
+            for: 5m
+            labels:
+              severity: critical
+              service: saga
+              tier: engine
+            annotations:
+              summary: "Workflow saga failure rate exceeds 30%"
+              description: "Over 30% of workflow sagas failed during the last 15 minutes."
+              remediation: "Inspect step errors across failed workflows and verify third-party microservice dependencies."
+
+          - alert: SagaCompensationFailed
+            expr: increase(workflow_compensation_failures_total[5m]) > 0
+            for: 0m
+            labels:
+              severity: critical
+              service: saga
+              tier: data-integrity
+            annotations:
+              summary: "Saga compensation (rollback) step failed"
+              description: "A workflow rollback routine failed to undo prior completed steps."
+              remediation: "Identify affected workflow ID in logs and execute manual compensating transactions immediately."
+
+          - alert: WorkflowQueueBacklog
+            expr: workflow_queue_depth > 50
+            for: 5m
+            labels:
+              severity: warning
+              service: queue
+              tier: throughput
+            annotations:
+              summary: "Workflow pending queue backlog exceeds 50 jobs"
+              description: "Pending workflow queue depth has remained above 50 for over 5 minutes."
+              remediation: "Scale worker instances and check if executor concurrency limits are saturated."
+
+          - alert: StaleMetrics
+            expr: (time() - workflow_metrics_last_collected_timestamp_seconds) > 120
+            for: 2m
+            labels:
+              severity: warning
+              service: monitoring
+              tier: observability
+            annotations:
+              summary: "Monitoring metrics collection loop is stalled"
+              description: "Workflow metrics have not been updated for over 120 seconds."
+              remediation: "Check monitoring service event loop lag and verify database connectivity."
+
+          - alert: RepeatedPodRestarts
+            expr: process_uptime_seconds < 120 and process_uptime_seconds > 0
+            for: 3m
+            labels:
+              severity: warning
+              service: process
+              tier: infrastructure
+            annotations:
+              summary: "Service process or container restarting repeatedly"
+              description: "Process uptime is persistently low (<120s), indicating crash loops."
+              remediation: "Inspect pod exit codes, check for OOMKilled events, and review resource limits."

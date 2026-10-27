@@ -3,11 +3,21 @@ kind: ConfigMap
 metadata:
   name: monitoring-config
   namespace: workflow-engine
+  labels:
+    app.kubernetes.io/name: workflow-monitoring
+    app.kubernetes.io/part-of: workflow-saga-engine
 data:
   PORT: "4000"
   BACKEND_URL: "http://workflow-backend-svc:5000"
   HEALTH_CHECK_INTERVAL: "30"
+  DEPENDENCY_TIMEOUT_MS: "4000"
   CPU_ALERT_THRESHOLD: "80"
   MEMORY_ALERT_THRESHOLD: "85"
   FAILURE_RATE_THRESHOLD: "30"
   WORKER_STALL_MINUTES: "10"
+  ALLOWED_WS_ORIGINS: "*"
+  WS_MAX_CLIENTS: "100"
+  WS_HEARTBEAT_INTERVAL_MS: "30000"
+  WS_HEARTBEAT_TIMEOUT_MS: "10000"
+  WS_SLOW_CLIENT_BYTES: "262144"
+  WS_POLL_INTERVAL_MS: "5000"

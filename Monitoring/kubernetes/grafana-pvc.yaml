@@ -1,0 +1,15 @@
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: grafana-storage-pvc
+  namespace: workflow-engine
+  labels:
+    app.kubernetes.io/name: workflow-grafana
+    app.kubernetes.io/component: visualization-dashboard
+    app.kubernetes.io/part-of: workflow-saga-engine
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 5Gi

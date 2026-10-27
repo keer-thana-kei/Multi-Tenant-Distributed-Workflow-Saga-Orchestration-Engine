@@ -3,4 +3,6 @@ kind: Namespace
 metadata:
   name: workflow-engine
   labels:
+    name: workflow-engine
+    app.kubernetes.io/name: workflow-engine
     app.kubernetes.io/part-of: workflow-saga-engine

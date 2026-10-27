@@ -5,6 +5,9 @@ metadata:
   namespace: workflow-engine
   labels:
     app: workflow-monitoring
+    app.kubernetes.io/name: workflow-monitoring
+    app.kubernetes.io/component: monitoring-service
+    app.kubernetes.io/part-of: workflow-saga-engine
 spec:
   type: ClusterIP
   selector:
@@ -12,5 +15,5 @@ spec:
   ports:
     - name: http
       port: 4000
-      targetPort: 4000
+      targetPort: http
       protocol: TCP
