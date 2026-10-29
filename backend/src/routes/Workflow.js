@@ -1,45 +1,66 @@
 const router = require('express').Router()
 const Workflow = require('../models/Workflow')
-const executeWorkflow = require('../engine/executor')
+const Execution = require('../models/Execution')
+const executeRun = require('../engine/executor')
+const { tenantAuth, tenantRateLimit } = require('../middleware/Tenant')
 
-// CREATE workflow
-router.post('/', async (req, res) => {
-    const { companyId, workflowName, steps } = req.body
-    const workflow = await Workflow.create({ 
-        companyId, 
-        workflowName, 
-        steps 
-    })
-    res.json(workflow)
+router.use(tenantAuth, tenantRateLimit)   // every route below is tenant-scoped
+
+router.post('/', async (req, res, next) => {
+    try {
+        const { workflowName, steps } = req.body
+        const workflow = await Workflow.create({ companyId: req.tenantId, workflowName, steps })
+        res.status(201).json(workflow)
+    } catch (err) { next(err) }
 })
 
-// GET all workflows
-router.get('/', async (req, res) => {
-    const workflows = await Workflow.find()
-    res.json(workflows)
+router.get('/', async (req, res, next) => {
+    try {
+        res.json(await Workflow.find({ companyId: req.tenantId }))
+    } catch (err) { next(err) }
 })
 
-// GET one workflow
-router.get('/:id', async (req, res) => {
-    const workflow = await Workflow.findById(req.params.id)
-    res.json(workflow)
+router.get('/:id', async (req, res, next) => {
+    try {
+        const wf = await Workflow.findOne({ _id: req.params.id, companyId: req.tenantId })
+        if (!wf) return res.status(404).json({ message: 'Workflow not found' })
+        res.json(wf)
+    } catch (err) { next(err) }
 })
 
-// DELETE workflow
-router.delete('/:id', async (req, res) => {
-    await Workflow.findByIdAndDelete(req.params.id)
-    res.json({ message: 'Deleted!!' })
+router.delete('/:id', async (req, res, next) => {
+    try {
+        const wf = await Workflow.findOneAndDelete({ _id: req.params.id, companyId: req.tenantId })
+        if (!wf) return res.status(404).json({ message: 'Workflow not found' })
+        res.json({ message: 'Deleted' })
+    } catch (err) { next(err) }
 })
 
-// RUN workflow ← THE ENGINE!!
-router.post('/:id/run', async (req, res) => {
-    const workflow = await Workflow.findById(req.params.id)
-    if (!workflow) return res.json({ message: 'Workflow not found!!' })
-    
-    // start engine!!
-    executeWorkflow(req.params.id)
-    
-    res.json({ message: 'Workflow started!!' })
+// RUN: creates an Execution, then starts the engine in the background
+router.post('/:id/run', async (req, res, next) => {
+    try {
+        const wf = await Workflow.findOne({ _id: req.params.id, companyId: req.tenantId })
+        if (!wf) return res.status(404).json({ message: 'Workflow not found' })
+
+        const execution = await Execution.create({
+            companyId: req.tenantId,
+            workflowId: wf._id,
+            steps: wf.steps.map((s) => s.toObject())
+        })
+
+        executeRun(execution._id).catch((err) => console.error('Engine crashed:', err))
+
+        res.status(202).json({ executionId: execution._id })
+    } catch (err) { next(err) }
+})
+
+// Run history for this tenant
+router.get('/executions/:execId', async (req, res, next) => {
+    try {
+        const ex = await Execution.findOne({ _id: req.params.execId, companyId: req.tenantId })
+        if (!ex) return res.status(404).json({ message: 'Execution not found' })
+        res.json(ex)
+    } catch (err) { next(err) }
 })
 
 module.exports = router

@@ -24,6 +24,7 @@ app.use("/api/auth", authRoutes);
 app.use("/api/keys", apiKeyRoutes);
 app.use("/api/test", testUserRoutes);
 app.use("/api/workflows", workflowRoutes);
+app.use('/mock', require('./routes/mock'))
 
 const PORT = process.env.PORT || 5000;
 
@@ -34,6 +35,7 @@ mongoose
 
     app.listen(PORT, () => {
       console.log(`Server running on http://localhost:${PORT}`);
+       console.log('Connected to DB:', mongoose.connection.name);
     });
   })
   .catch((error) => {

@@ -1,23 +1,18 @@
 const mongoose = require('mongoose')
 
-const StepSchema = new mongoose.Schema({
-    name: String,
-    url: String,
+const stepSchema = new mongoose.Schema({
+    name: { type: String, required: true },
+    url: { type: String, required: true },
     method: { type: String, default: 'POST' },
-    status: { 
-        type: String, 
-        default: 'pending'
-    }
-})
+    compensateUrl: String,
+    compensateMethod: { type: String, default: 'POST' },
+    maxRetries: { type: Number, default: 3 }
+}, { _id: false })
 
-const WorkflowSchema = new mongoose.Schema({
-    companyId: String,
-    workflowName: String,
-    steps: [StepSchema],
-    status: { 
-        type: String, 
-        default: 'pending'
-    }
+const workflowSchema = new mongoose.Schema({
+    companyId: { type: mongoose.Schema.Types.ObjectId, ref: 'Tenant', required: true, index: true },
+    workflowName: { type: String, required: true },
+    steps: [stepSchema]
 }, { timestamps: true })
 
-module.exports = mongoose.model('Workflow', WorkflowSchema)
+module.exports = mongoose.model('Workflow', workflowSchema)
