@@ -1,0 +1,85 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: monitoring-deployment
+  namespace: workflow-engine
+  labels:
+    app: workflow-monitoring
+    app.kubernetes.io/name: workflow-monitoring
+    app.kubernetes.io/component: monitoring-service
+    app.kubernetes.io/part-of: workflow-saga-engine
+spec:
+  replicas: 2
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  selector:
+    matchLabels:
+      app: workflow-monitoring
+  template:
+    metadata:
+      labels:
+        app: workflow-monitoring
+        app.kubernetes.io/name: workflow-monitoring
+        app.kubernetes.io/component: monitoring-service
+        app.kubernetes.io/part-of: workflow-saga-engine
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+      containers:
+        - name: monitoring
+          image: workflow-engine-monitoring:latest
+          imagePullPolicy: IfNotPresent
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
+          ports:
+            - containerPort: 4000
+              name: http
+              protocol: TCP
+          envFrom:
+            - configMapRef:
+                name: monitoring-config
+            - secretRef:
+                name: monitoring-secrets
+          # Startup probe — allows up to 60s for initial database connection & socket binding
+          startupProbe:
+            httpGet:
+              path: /health/live
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 2
+            timeoutSeconds: 3
+            failureThreshold: 30
+          # Liveness probe — checks process viability; does NOT restart if downstream DB is down
+          livenessProbe:
+            httpGet:
+              path: /health/live
+              port: http
+            periodSeconds: 15
+            timeoutSeconds: 5
+            failureThreshold: 3
+          # Readiness probe — verifies database & API connectivity before routing traffic
+          readinessProbe:
+            httpGet:
+              path: /health/ready
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 2
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "128Mi"
+            limits:
+              cpu: "500m"
+              memory: "512Mi"
+      restartPolicy: Always

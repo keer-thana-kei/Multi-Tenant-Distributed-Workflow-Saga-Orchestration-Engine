@@ -1,0 +1,96 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: grafana-deployment
+  namespace: workflow-engine
+  labels:
+    app: workflow-grafana
+    app.kubernetes.io/name: workflow-grafana
+    app.kubernetes.io/component: visualization-dashboard
+    app.kubernetes.io/part-of: workflow-saga-engine
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: workflow-grafana
+  template:
+    metadata:
+      labels:
+        app: workflow-grafana
+        app.kubernetes.io/name: workflow-grafana
+        app.kubernetes.io/component: visualization-dashboard
+        app.kubernetes.io/part-of: workflow-saga-engine
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 472
+        runAsGroup: 472
+        fsGroup: 472
+      containers:
+        - name: grafana
+          image: grafana/grafana:11.1.0
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: GF_SECURITY_ADMIN_USER
+              value: "admin"
+            - name: GF_SECURITY_ADMIN_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: monitoring-secrets
+                  key: JWT_SECRET
+                  optional: true
+            - name: GF_USERS_ALLOW_SIGN_UP
+              value: "false"
+            - name: GF_SERVER_SERVE_FROM_SUB_PATH
+              value: "false"
+          ports:
+            - name: http
+              containerPort: 3000
+              protocol: TCP
+          livenessProbe:
+            httpGet:
+              path: /api/health
+              port: http
+            initialDelaySeconds: 20
+            periodSeconds: 15
+            timeoutSeconds: 5
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /api/health
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 2
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "128Mi"
+            limits:
+              cpu: "500m"
+              memory: "512Mi"
+          volumeMounts:
+            - name: storage
+              mountPath: /var/lib/grafana
+            - name: config-datasources
+              mountPath: /etc/grafana/provisioning/datasources/prometheus-datasource.yaml
+              subPath: prometheus-datasource.yaml
+              readOnly: true
+            - name: config-dashboards
+              mountPath: /etc/grafana/provisioning/dashboards/dashboards-provider.yaml
+              subPath: dashboards-provider.yaml
+              readOnly: true
+      volumes:
+        - name: storage
+          persistentVolumeClaim:
+            claimName: grafana-storage-pvc
+        - name: config-datasources
+          configMap:
+            name: grafana-config
+        - name: config-dashboards
+          configMap:
+            name: grafana-config
+      restartPolicy: Always

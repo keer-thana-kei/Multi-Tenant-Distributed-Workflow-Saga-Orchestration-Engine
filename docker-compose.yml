@@ -1,0 +1,106 @@
+version: "3.9"
+
+networks:
+  workflow-net:
+    name: workflow-net
+    driver: bridge
+
+services:
+  # ── Existing Backend ────────────────────────────────────────────────────
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    image: workflow-engine-backend:latest
+    container_name: workflow-backend
+    restart: unless-stopped
+    ports:
+      - "5000:5000"
+    env_file:
+      - ./backend/.env
+    networks:
+      - workflow-net
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:5000/"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+
+  # ── Monitoring Service ───────────────────────────────────────────────────
+  monitoring:
+    build:
+      context: ./Monitoring
+      dockerfile: Dockerfile
+    image: workflow-engine-monitoring:latest
+    container_name: workflow-monitoring
+    restart: unless-stopped
+    ports:
+      - "4000:4000"
+    environment:
+      PORT: "4000"
+      BACKEND_URL: "http://backend:5000"
+      HEALTH_CHECK_INTERVAL: "30"
+      CPU_ALERT_THRESHOLD: "80"
+      MEMORY_ALERT_THRESHOLD: "85"
+      FAILURE_RATE_THRESHOLD: "30"
+      WORKER_STALL_MINUTES: "10"
+    env_file:
+      - ./backend/.env     # shares MONGODB_URI
+    depends_on:
+      backend:
+        condition: service_healthy
+    networks:
+      - workflow-net
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:4000/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 25s
+
+  # ── Prometheus (Observability & Scraper) ──────────────────────────────────
+  prometheus:
+    image: prom/prometheus:v2.53.1
+    container_name: workflow-prometheus
+    restart: unless-stopped
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./Monitoring/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./Monitoring/alerts/alert_rules.yml:/etc/prometheus/alert_rules.yml:ro
+      - prometheus-data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--web.console.libraries=/usr/share/prometheus/console_libraries'
+      - '--web.console.templates=/usr/share/prometheus/consoles'
+      - '--web.enable-lifecycle'
+    depends_on:
+      - monitoring
+    networks:
+      - workflow-net
+
+  # ── Grafana (Dashboards & Visualization) ──────────────────────────────────
+  grafana:
+    image: grafana/grafana:11.1.0
+    container_name: workflow-grafana
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+      - GF_USERS_ALLOW_SIGN_UP=false
+    volumes:
+      - ./Monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./Monitoring/grafana/dashboards:/etc/grafana/provisioning/dashboards:ro
+      - grafana-data:/var/lib/grafana
+    depends_on:
+      - prometheus
+    networks:
+      - workflow-net
+
+volumes:
+  prometheus-data:
+  grafana-data:

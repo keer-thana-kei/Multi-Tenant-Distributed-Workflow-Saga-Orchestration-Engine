@@ -1,0 +1,38 @@
+# =============================================================================
+# Ingress Manifest for Workflow Monitoring Dashboard
+#
+# IMPORTANT SECURITY POLICY:
+# 1. ONLY the monitoring service (port 4000) is routed through public Ingress
+#    for the live dashboard UI and real-time WebSocket telemetry stream.
+# 2. Prometheus (9090), Alertmanager (9093), and Grafana (3000) are kept
+#    strictly INTERNAL (ClusterIP) by default. Use port-forwarding or a private
+#    VPN/OAuth reverse-proxy to access internal management tools.
+# =============================================================================
+
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: workflow-monitoring-ingress
+  namespace: workflow-engine
+  labels:
+    app.kubernetes.io/name: workflow-monitoring
+    app.kubernetes.io/component: ingress-controller
+    app.kubernetes.io/part-of: workflow-saga-engine
+  annotations:
+    kubernetes.io/ingress.class: nginx
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "3600"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "3600"
+    nginx.ingress.kubernetes.io/websocket-services: "workflow-monitoring-svc"
+    nginx.ingress.kubernetes.io/ssl-redirect: "false"
+spec:
+  rules:
+    - host: monitoring.local
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: workflow-monitoring-svc
+                port:
+                  number: 4000

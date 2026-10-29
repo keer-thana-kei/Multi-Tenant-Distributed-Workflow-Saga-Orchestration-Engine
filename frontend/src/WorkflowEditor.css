@@ -1,0 +1,244 @@
+
+.editor-page {
+  min-height: 100vh;
+  padding: 30px 36px;
+  background: #f5f6fb;
+  color: #17172b;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+}
+
+.editor-header {
+  display: grid;
+  grid-template-columns: 1fr 2fr 1fr;
+  align-items: center;
+  gap: 20px;
+  margin-bottom: 28px;
+}
+
+.editor-heading {
+  text-align: center;
+}
+
+.editor-heading h1 {
+  margin: 0 0 8px;
+  font-size: 28px;
+}
+
+.editor-heading p {
+  margin: 0;
+  color: #8589a5;
+  line-height: 1.5;
+}
+
+.editor-back,
+.editor-add,
+.editor-save {
+  border: none;
+  border-radius: 9px;
+  padding: 14px 18px;
+  font-size: 15px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: opacity 0.2s ease;
+}
+
+.editor-back:hover,
+.editor-add:hover,
+.editor-save:hover {
+  opacity: 0.85;
+}
+
+.editor-back {
+  justify-self: start;
+  background: #eeeaff;
+  color: #6855e7;
+}
+
+.editor-actions {
+  display: flex;
+  justify-content: end;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.editor-add {
+  background: #6855e7;
+  color: white;
+}
+
+.editor-save {
+  background: white;
+  color: #6855e7;
+  border: 1px solid #dcd6ff;
+}
+
+.save-message {
+  margin: -10px 0 18px;
+  color: #07875b;
+  font-size: 14px;
+  text-align: right;
+}
+
+.editor-toolbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  padding: 18px 22px;
+  background: white;
+  border: 1px solid #e5e7f0;
+  border-radius: 14px 14px 0 0;
+  color: #8589a5;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.editor-workspace {
+  display: flex;
+  flex: 1;
+  min-height: 440px;
+  width: 100%;
+  border: 1px solid #e5e7f0;
+  border-top: none;
+  border-radius: 0 0 14px 14px;
+  overflow: hidden;
+  background: white;
+}
+
+.node-palette {
+  flex: 0 0 190px;
+  width: 190px;
+  padding: 16px;
+  background: #ffffff;
+  border-right: 1px solid #e5e7f0;
+  box-sizing: border-box;
+}
+
+.node-palette h3 {
+  margin: 0 0 10px;
+  color: #17172b;
+  font-size: 17px;
+}
+
+.node-palette p {
+  margin: 0 0 18px;
+  color: #8589a5;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.palette-node {
+  padding: 12px;
+  margin-bottom: 12px;
+  border: 1px solid #d1d5db;
+  border-radius: 8px;
+  color: #24233d;
+  font-size: 14px;
+  font-weight: 600;
+  text-align: center;
+  cursor: grab;
+  /* user-select: none; */
+  transition: transform 0.15s ease, box-shadow 0.15s ease;
+}
+
+.palette-node:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 10px rgb(0 0 0 / 8%);
+}
+
+.palette-node:active {
+  cursor: grabbing;
+}
+
+.workflow-canvas {
+  flex: 1;
+  min-width: 0;
+  height: 68vh;
+  min-height: 440px;
+  background: #ffffff;
+}
+
+.workflow-canvas .react-flow__node {
+  min-width: 150px;
+  padding: 18px 24px;
+  border: 1px solid #333348;
+  border-radius: 8px;
+  background: white;
+  color: #17172b;
+  font-size: 15px;
+  text-align: center;
+}
+
+.workflow-canvas .react-flow__node-input {
+  border-color: #10a778;
+  background: #d1fae5;
+}
+
+.workflow-canvas .react-flow__node-output {
+  border-color: #e05252;
+  background: #fee2e2;
+}
+
+.workflow-canvas .condition-node {
+  position: relative;
+  min-width: 130px;
+  padding: 18px 24px;
+  border: 1px solid #d97706;
+  border-radius: 8px;
+  background: #fef3c7;
+  color: #713f12;
+  text-align: center;
+  font-weight: 600;
+}
+
+.workflow-canvas .react-flow__edge-path {
+  stroke: #9999a8;
+  stroke-width: 2;
+}
+
+@media (max-width: 760px) {
+  .editor-page {
+    padding: 18px 12px;
+  }
+
+  .editor-header {
+    grid-template-columns: 1fr;
+  }
+
+  .editor-heading {
+    text-align: left;
+  }
+
+  .editor-actions {
+    justify-content: flex-start;
+  }
+
+  .editor-workspace {
+    flex-direction: column;
+  }
+
+  .node-palette {
+    width: 100%;
+    flex: 0 0 auto;
+    border-right: none;
+    border-bottom: 1px solid #e5e7f0;
+  }
+
+  .node-palette p {
+    margin-bottom: 10px;
+  }
+
+  .palette-node {
+    display: inline-block;
+    min-width: 90px;
+    margin-right: 8px;
+  }
+
+  .workflow-canvas {
+    height: 65vh;
+    min-height: 380px;
+  }
+}

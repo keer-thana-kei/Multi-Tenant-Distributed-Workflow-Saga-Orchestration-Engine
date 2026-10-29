@@ -1,0 +1,58 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: alertmanager-config
+  namespace: workflow-engine
+  labels:
+    app.kubernetes.io/name: workflow-alertmanager
+    app.kubernetes.io/component: alert-router
+    app.kubernetes.io/part-of: workflow-saga-engine
+data:
+  alertmanager.yml: |
+    global:
+      resolve_timeout: 5m
+      smtp_smarthost: 'localhost:25'
+      smtp_from: 'alerts@workflow-engine.local'
+      smtp_require_tls: false
+
+    route:
+      group_by: ['alertname', 'severity', 'service']
+      group_wait: 30s
+      group_interval: 5m
+      repeat_interval: 4h
+      receiver: 'default-webhook'
+
+      routes:
+        - match:
+            severity: critical
+          receiver: 'critical-alerts'
+          group_wait: 10s
+          repeat_interval: 1h
+
+        - match:
+            severity: warning
+          receiver: 'ops-channel'
+          repeat_interval: 8h
+
+    inhibit_rules:
+      - source_match:
+          severity: 'critical'
+        target_match:
+          severity: 'warning'
+        equal: ['service']
+
+    receivers:
+      - name: 'default-webhook'
+        webhook_configs:
+          - url: 'http://workflow-monitoring-svc.workflow-engine.svc.cluster.local:4000/alerts/webhook'
+            send_resolved: true
+
+      - name: 'critical-alerts'
+        webhook_configs:
+          - url: 'http://workflow-monitoring-svc.workflow-engine.svc.cluster.local:4000/alerts/webhook'
+            send_resolved: true
+
+      - name: 'ops-channel'
+        webhook_configs:
+          - url: 'http://workflow-monitoring-svc.workflow-engine.svc.cluster.local:4000/alerts/webhook'
+            send_resolved: true

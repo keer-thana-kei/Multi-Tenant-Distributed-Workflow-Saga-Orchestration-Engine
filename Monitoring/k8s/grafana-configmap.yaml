@@ -1,0 +1,36 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: grafana-config
+  namespace: workflow-engine
+  labels:
+    app.kubernetes.io/name: workflow-grafana
+    app.kubernetes.io/component: visualization-dashboard
+    app.kubernetes.io/part-of: workflow-saga-engine
+data:
+  prometheus-datasource.yaml: |
+    apiVersion: 1
+    datasources:
+      - name: Prometheus
+        type: prometheus
+        access: proxy
+        url: http://workflow-prometheus-svc.workflow-engine.svc.cluster.local:9090
+        isDefault: true
+        version: 1
+        editable: false
+        jsonData:
+          timeInterval: 15s
+          httpMethod: POST
+
+  dashboards-provider.yaml: |
+    apiVersion: 1
+    providers:
+      - name: 'Saga Engine Dashboards'
+        orgId: 1
+        folder: 'Saga Engine'
+        type: file
+        disableDeletion: true
+        updateIntervalSeconds: 30
+        allowUiUpdates: false
+        options:
+          path: /etc/grafana/provisioning/dashboards

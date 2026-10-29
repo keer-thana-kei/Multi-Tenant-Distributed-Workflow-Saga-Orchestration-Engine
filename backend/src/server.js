@@ -20,6 +20,10 @@ app.get("/", (req, res) => {
   });
 });
 
+app.get("/health", (req, res) => {
+  res.json({ status: "ok", service: "workflow-backend" });
+});
+
 app.use("/api/auth", authRoutes);
 app.use("/api/keys", apiKeyRoutes);
 app.use("/api/test", testUserRoutes);

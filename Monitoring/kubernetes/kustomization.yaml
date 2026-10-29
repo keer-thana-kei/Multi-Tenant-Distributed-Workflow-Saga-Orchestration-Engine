@@ -1,0 +1,41 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: workflow-engine
+
+labels:
+  - pairs:
+      app.kubernetes.io/part-of: workflow-saga-engine
+      app.kubernetes.io/managed-by: kustomize
+
+resources:
+  # 1. Namespace
+  - namespace.yaml
+  # 2. Monitoring Microservice
+  - configmap.yaml
+  - secret.yaml
+  - monitoring-deployment.yaml
+  - monitoring-service.yaml
+  # 3. Alertmanager
+  - alertmanager-pvc.yaml
+  - alertmanager-configmap.yaml
+  - alertmanager-deployment.yaml
+  - alertmanager-service.yaml
+  # 4. Prometheus Engine
+  - prometheus-pvc.yaml
+  - prometheus-configmap.yaml
+  - prometheus-deployment.yaml
+  - prometheus-service.yaml
+  # 5. Grafana Dashboards
+  - grafana-pvc.yaml
+  - grafana-configmap.yaml
+  - grafana-deployment.yaml
+  - grafana-service.yaml
+  # 6. Ingress Routing
+  - ingress.yaml
+
+# Environment-specific image overrides
+images:
+  - name: workflow-engine-monitoring
+    newName: workflow-engine-monitoring
+    newTag: latest
