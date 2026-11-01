@@ -1,5 +1,5 @@
-
 const Execution = require('../models/Execution')
+const { setExecStatus, setStepStatus } = require('./stateMachine')
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
 
@@ -23,7 +23,7 @@ const runWithRetry = async (url, method, maxRetries = 3) => {
 }
 
 const rollback = async (exec, failedIndex) => {
-    exec.status = 'compensating'
+    setExecStatus(exec, 'compensating')
     await exec.save()
 
     for (let i = failedIndex - 1; i >= 0; i--) {
@@ -31,29 +31,29 @@ const rollback = async (exec, failedIndex) => {
         if (step.status !== 'success') continue
 
         if (!step.compensateUrl) {
-            step.status = 'compensation_skipped'
+            setStepStatus(step, 'compensation_skipped')
         } else {
             const { ok } = await runWithRetry(step.compensateUrl, step.compensateMethod || 'POST', step.maxRetries)
-            step.status = ok ? 'compensated' : 'compensation_failed'
+            setStepStatus(step, ok ? 'compensated' : 'compensation_failed')
         }
         await exec.save()
     }
 
     const anyFailed = exec.steps.some((s) => s.status === 'compensation_failed')
-    exec.status = anyFailed ? 'failed' : 'compensated'
+    setExecStatus(exec, anyFailed ? 'failed' : 'compensated')
     exec.finishedAt = new Date()
     await exec.save()
 }
 
 const executeRun = async (executionId) => {
     const exec = await Execution.findById(executionId)
-    exec.status = 'running'
+    setExecStatus(exec, 'running')
     exec.startedAt = new Date()
     await exec.save()
 
     for (let i = 0; i < exec.steps.length; i++) {
         const step = exec.steps[i]
-        step.status = 'running'
+        setStepStatus(step, 'running')
         step.startedAt = new Date()
         await exec.save()
 
@@ -62,18 +62,34 @@ const executeRun = async (executionId) => {
         step.finishedAt = new Date()
 
         if (!ok) {
-            step.status = 'failed'
+            setStepStatus(step, 'failed')
             await exec.save()
             return rollback(exec, i)
         }
 
-        step.status = 'success'
+        setStepStatus(step, 'success')
         await exec.save()
     }
 
-    exec.status = 'success'
+    setExecStatus(exec, 'success')
     exec.finishedAt = new Date()
     await exec.save()
 }
 
+// Runs interrupted by a crash would stay "running" forever.
+// Mark them failed so a human can review (auto-resume could double-charge).
+const recoverStuckRuns = async () => {
+    const stuck = await Execution.find({ status: { $in: ['running', 'compensating'] } })
+    for (const exec of stuck) {
+        for (const step of exec.steps) {
+            if (step.status === 'running') step.status = 'failed'
+        }
+        exec.status = 'failed'
+        exec.finishedAt = new Date()
+        await exec.save()
+        console.log(`Recovered stuck execution ${exec._id} -> failed`)
+    }
+}
+
 module.exports = executeRun
+module.exports.recoverStuckRuns = recoverStuckRuns

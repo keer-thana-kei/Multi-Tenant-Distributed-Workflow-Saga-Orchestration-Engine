@@ -1,4 +1,5 @@
 const crypto = require('crypto')
+const jwt = require('jsonwebtoken')
 const rateLimit = require('express-rate-limit')
 const Tenant = require('../models/Tenant')
 
@@ -10,11 +11,32 @@ const generateApiKey = () => {
     return { key, hash: hashKey(key), prefix: key.slice(0, 7) }
 }
 
-// Identify the tenant from the x-api-key header
+// Identify the tenant from a JWT (logged-in person) OR an x-api-key (program)
 const tenantAuth = async (req, res, next) => {
     try {
+        // Option A: JWT from login (React canvas, dashboard)
+        const auth = req.header('authorization')
+        if (auth && auth.startsWith('Bearer ')) {
+            let payload
+            try {
+                payload = jwt.verify(auth.slice(7), process.env.JWT_SECRET)
+            } catch {
+                return res.status(401).json({ message: 'Invalid or expired token' })
+            }
+            if (!payload.tenantId) {
+                return res.status(401).json({ message: 'Token has no tenant' })
+            }
+            const tenant = await Tenant.findOne({ _id: payload.tenantId, active: true })
+            if (!tenant) return res.status(401).json({ message: 'Invalid token' })
+
+            req.tenantId = tenant._id
+            req.tenant = tenant
+            return next()
+        }
+
+        // Option B: API key
         const key = req.header('x-api-key')
-        if (!key) return res.status(401).json({ message: 'Missing API key' })
+        if (!key) return res.status(401).json({ message: 'Missing credentials' })
 
         const tenant = await Tenant.findOne({ apiKeyHash: hashKey(key), active: true })
         if (!tenant) return res.status(401).json({ message: 'Invalid API key' })
