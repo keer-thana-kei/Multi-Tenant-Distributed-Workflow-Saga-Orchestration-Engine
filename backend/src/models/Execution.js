@@ -21,6 +21,7 @@ const execStepSchema = new mongoose.Schema({
 const executionSchema = new mongoose.Schema({
     companyId: { type: mongoose.Schema.Types.ObjectId, required: true, index: true },
     workflowId: { type: mongoose.Schema.Types.ObjectId, ref: 'Workflow', required: true },
+    eventId: { type: mongoose.Schema.Types.ObjectId, ref: 'Event' },
     status: {
         type: String,
         enum: ['pending', 'running', 'success', 'compensating', 'compensated', 'failed'],
