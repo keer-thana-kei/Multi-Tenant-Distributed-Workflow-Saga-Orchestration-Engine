@@ -12,6 +12,7 @@ const stepSchema = new mongoose.Schema({
 const workflowSchema = new mongoose.Schema({
     companyId: { type: mongoose.Schema.Types.ObjectId, ref: 'Tenant', required: true, index: true },
     workflowName: { type: String, required: true },
+    triggerEvent: { type: String, index: true },
     steps: [stepSchema]
 }, { timestamps: true })
 

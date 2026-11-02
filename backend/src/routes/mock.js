@@ -14,6 +14,7 @@ router.post('/sms', (req, res) => {
     console.log('MOCK: sms failing on purpose')
     res.status(500).json({ ok: false })
 })
+
 router.post('/slow', (req, res) => setTimeout(() => res.json({ ok: true }), 4000))
 
 module.exports = router

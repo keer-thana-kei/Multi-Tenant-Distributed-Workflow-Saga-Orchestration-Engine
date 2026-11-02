@@ -2,14 +2,19 @@ const router = require('express').Router()
 const Workflow = require('../models/Workflow')
 const Execution = require('../models/Execution')
 const executeRun = require('../engine/executor')
-const { tenantAuth, tenantRateLimit } = require('../middleware/Tenant')
+const { tenantAuth, tenantRateLimit } = require('../middleware/tenant')
 
-router.use(tenantAuth, tenantRateLimit)   // every route below is tenant-scoped
+router.use(tenantAuth, tenantRateLimit)
 
 router.post('/', async (req, res, next) => {
     try {
-        const { workflowName, steps } = req.body
-        const workflow = await Workflow.create({ companyId: req.tenantId, workflowName, steps })
+        const { workflowName, steps, triggerEvent } = req.body
+        const workflow = await Workflow.create({
+            companyId: req.tenantId,
+            workflowName,
+            steps,
+            triggerEvent
+        })
         res.status(201).json(workflow)
     } catch (err) { next(err) }
 })
@@ -17,6 +22,14 @@ router.post('/', async (req, res, next) => {
 router.get('/', async (req, res, next) => {
     try {
         res.json(await Workflow.find({ companyId: req.tenantId }))
+    } catch (err) { next(err) }
+})
+
+router.get('/executions/:execId', async (req, res, next) => {
+    try {
+        const ex = await Execution.findOne({ _id: req.params.execId, companyId: req.tenantId })
+        if (!ex) return res.status(404).json({ message: 'Execution not found' })
+        res.json(ex)
     } catch (err) { next(err) }
 })
 
@@ -36,7 +49,6 @@ router.delete('/:id', async (req, res, next) => {
     } catch (err) { next(err) }
 })
 
-// RUN: creates an Execution, then starts the engine in the background
 router.post('/:id/run', async (req, res, next) => {
     try {
         const wf = await Workflow.findOne({ _id: req.params.id, companyId: req.tenantId })
@@ -51,15 +63,6 @@ router.post('/:id/run', async (req, res, next) => {
         executeRun(execution._id).catch((err) => console.error('Engine crashed:', err))
 
         res.status(202).json({ executionId: execution._id })
-    } catch (err) { next(err) }
-})
-
-// Run history for this tenant
-router.get('/executions/:execId', async (req, res, next) => {
-    try {
-        const ex = await Execution.findOne({ _id: req.params.execId, companyId: req.tenantId })
-        if (!ex) return res.status(404).json({ message: 'Execution not found' })
-        res.json(ex)
     } catch (err) { next(err) }
 })
 
