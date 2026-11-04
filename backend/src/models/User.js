@@ -19,11 +19,15 @@ const userSchema = new mongoose.Schema(
     password: {
       type: String,
       required: true
+    },
+
+    tenantId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Tenant",
+      required: true
     }
   },
-  {
-    timestamps: true
-  }
+  { timestamps: true }
 );
 
 module.exports = mongoose.model("User", userSchema);

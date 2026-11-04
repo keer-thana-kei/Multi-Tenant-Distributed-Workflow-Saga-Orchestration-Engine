@@ -19,7 +19,11 @@ const execStepSchema = new mongoose.Schema({
 }, { _id: false })
 
 const executionSchema = new mongoose.Schema({
-    companyId: { type: mongoose.Schema.Types.ObjectId, required: true, index: true },
+    companyId: { type: mongoose.Schema.Types.ObjectId, 
+        required: true, 
+        ref: 'Tenant',
+        required: true,
+        index: true },
     workflowId: { type: mongoose.Schema.Types.ObjectId, ref: 'Workflow', required: true },
     eventId: { type: mongoose.Schema.Types.ObjectId, ref: 'Event' },
     status: {

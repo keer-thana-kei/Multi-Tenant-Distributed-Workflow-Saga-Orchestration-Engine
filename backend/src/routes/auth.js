@@ -2,7 +2,7 @@ const express = require("express");
 const bcrypt = require("bcrypt");
 const jwt = require("jsonwebtoken");
 const User = require("../models/User");
-
+const Tenant = require("../models/Tenant");
 const router = express.Router();
 
 // REGISTER
@@ -24,23 +24,39 @@ router.post("/register", async (req, res) => {
       });
     }
 
+    // Find the active workflow-engine tenant
+    const tenant = await Tenant.findOne({
+       name: "workflow-engine",
+        active: true
+    });
+
+    if (!tenant) {
+      return res.status(404).json({
+         message: "Workflow-engine tenant not found"
+      });
+    }
+
+  // Hash password
     const hashedPassword = await bcrypt.hash(password, 10);
 
+  // Create user with tenant ID
     const user = await User.create({
       name,
       email,
-      password: hashedPassword
+      password: hashedPassword,
+      tenantId: tenant._id
     });
 
     const token = jwt.sign(
-      {
-        userId: user._id,
-        email: user.email
-      },
-      process.env.JWT_SECRET,
-      {
-        expiresIn: "1h"
-      }
+    {
+      userId: user._id,
+      email: user.email,
+      tenantId: user.tenantId
+    },
+    process.env.JWT_SECRET,
+    {
+      expiresIn: "1h"
+    }
     );
 
     res.status(201).json({
@@ -88,7 +104,8 @@ router.post("/login", async (req, res) => {
     const token = jwt.sign(
       {
         userId: user._id,
-        email: user.email
+        email: user.email,
+        tenantId: user.tenantId
       },
       process.env.JWT_SECRET,
       {
