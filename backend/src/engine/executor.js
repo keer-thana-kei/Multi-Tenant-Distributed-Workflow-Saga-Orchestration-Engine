@@ -1,10 +1,16 @@
 const Execution = require('../models/Execution')
 const { setExecStatus, setStepStatus } = require('./stateMachine')
+const { publish } = require('./traceBus')
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
 const MAX_OUTPUT_CHARS = 10000
 
-// Keep stored output small
+// Save to the database, then tell live viewers
+const persist = async (exec) => {
+    await exec.save()
+    publish(exec)
+}
+
 const trimOutput = (output) => {
     try {
         const text = JSON.stringify(output ?? null)
@@ -25,23 +31,23 @@ const callStep = async (url, method) => {
     }
 }
 
-const runWithRetry = async (url, method, maxRetries = 3) => {
+const runWithRetry = async (url, method, maxRetries = 3, onAttempt) => {
     let attempts = 0
     for (let a = 0; a <= maxRetries; a++) {
         if (a > 0) await sleep(1000 * 2 ** (a - 1))   // 1s, 2s, 4s
         attempts++
+        if (onAttempt) await onAttempt(attempts)
         const { ok, output } = await callStep(url, method)
         if (ok) return { ok: true, attempts, output }
     }
     return { ok: false, attempts, output: null }
 }
 
-// ---- conditions on arrows
 const getPath = (obj, path) =>
     path.split('.').reduce((o, k) => (o === null || o === undefined ? undefined : o[k]), obj)
 
 const checkCondition = (cond, output) => {
-    if (!cond || !cond.field) return true            // no condition = always follow
+    if (!cond || !cond.field) return true
     const op = cond.op || 'equals'
     const actual = getPath(output, cond.field)
 
@@ -56,12 +62,9 @@ const checkCondition = (cond, output) => {
     }
 }
 
-// ---- Saga rollback: newest finished step first.
-// Steps are stored in run order, so we walk backwards.
-// Skipped / pending / failed steps are ignored (only "success" needs undoing).
 const rollback = async (exec, failedIndex) => {
     setExecStatus(exec, 'compensating')
-    await exec.save()
+    await persist(exec)
 
     for (let i = failedIndex - 1; i >= 0; i--) {
         const step = exec.steps[i]
@@ -77,13 +80,13 @@ const rollback = async (exec, failedIndex) => {
             )
             setStepStatus(step, ok ? 'compensated' : 'compensation_failed')
         }
-        await exec.save()
+        await persist(exec)
     }
 
     const anyFailed = exec.steps.some((s) => s.status === 'compensation_failed')
     setExecStatus(exec, anyFailed ? 'failed' : 'compensated')
     exec.finishedAt = new Date()
-    await exec.save()
+    await persist(exec)
 }
 
 const executeRun = async (executionId) => {
@@ -92,7 +95,7 @@ const executeRun = async (executionId) => {
 
     setExecStatus(exec, 'running')
     exec.startedAt = new Date()
-    await exec.save()
+    await persist(exec)
 
     const isGraph = exec.steps.some((s) => s.nodeId)
     const byNodeId = new Map(exec.steps.filter((s) => s.nodeId).map((s) => [s.nodeId, s]))
@@ -100,7 +103,6 @@ const executeRun = async (executionId) => {
     for (let i = 0; i < exec.steps.length; i++) {
         const step = exec.steps[i]
 
-        // Graph: should this node run? Only if an incoming arrow is active.
         if (isGraph) {
             const incoming = exec.edges.filter((e) => e.to === step.nodeId)
             if (incoming.length > 0) {
@@ -114,7 +116,7 @@ const executeRun = async (executionId) => {
                 })
                 if (!active) {
                     setStepStatus(step, 'skipped')
-                    await exec.save()
+                    await persist(exec)
                     continue
                 }
             }
@@ -122,34 +124,40 @@ const executeRun = async (executionId) => {
 
         setStepStatus(step, 'running')
         step.startedAt = new Date()
-        await exec.save()
+        await persist(exec)
 
-        const { ok, attempts, output } = await runWithRetry(step.url, step.method, step.maxRetries)
+        // Live "attempt 2, attempt 3..." updates while retrying
+        const { ok, attempts, output } = await runWithRetry(
+            step.url,
+            step.method,
+            step.maxRetries,
+            async (n) => {
+                step.attempts = n
+                if (n > 1) await persist(exec)
+            }
+        )
         step.attempts = attempts
         step.finishedAt = new Date()
 
         if (!ok) {
             setStepStatus(step, 'failed')
-            // nodes that never got their turn are skipped, not left "pending"
             for (let j = i + 1; j < exec.steps.length; j++) {
                 if (exec.steps[j].status === 'pending') setStepStatus(exec.steps[j], 'skipped')
             }
-            await exec.save()
+            await persist(exec)
             return rollback(exec, i)
         }
 
         step.output = trimOutput(output)
         setStepStatus(step, 'success')
-        await exec.save()
+        await persist(exec)
     }
 
     setExecStatus(exec, 'success')
     exec.finishedAt = new Date()
-    await exec.save()
+    await persist(exec)
 }
 
-// Runs interrupted by a crash would stay "running" forever.
-// Mark them failed so a human can review (auto-resume could double-charge).
 const recoverStuckRuns = async () => {
     const stuck = await Execution.find({ status: { $in: ['running', 'compensating'] } })
     for (const exec of stuck) {
