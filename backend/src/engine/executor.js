@@ -1,11 +1,11 @@
 const Execution = require('../models/Execution')
-const { setExecStatus, setStepStatus } = require('./stateMachine')
+const DeadLetter = require('../models/DeadLetter')
+const { setExecStatus, setStepStatus } = require('../engine/statemachine')
 const { publish } = require('./traceBus')
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
 const MAX_OUTPUT_CHARS = 10000
 
-// Save to the database, then tell live viewers
 const persist = async (exec) => {
     await exec.save()
     publish(exec)
@@ -20,29 +20,92 @@ const trimOutput = (output) => {
     }
 }
 
-const callStep = async (url, method) => {
+// ---------- retry policy ----------
+const clamp = (v, min, max, fallback) => {
+    const n = Number(v)
+    if (!Number.isFinite(n)) return fallback
+    return Math.min(max, Math.max(min, n))
+}
+
+// Safe limits so a tenant cannot ask for 1,000,000 retries
+const policyOf = (step) => ({
+    maxRetries: clamp(step.maxRetries, 0, 10, 3),
+    backoff: step.backoff === 'fixed' ? 'fixed' : 'exponential',
+    baseDelayMs: clamp(step.baseDelayMs, 100, 60000, 1000),
+    maxDelayMs: clamp(step.maxDelayMs, 100, 300000, 30000),
+    timeoutMs: clamp(step.timeoutMs, 500, 30000, 5000),
+    retryOnStatus:
+        Array.isArray(step.retryOnStatus) && step.retryOnStatus.length
+            ? step.retryOnStatus.map(Number)
+            : null
+})
+
+const delayFor = (retryNumber, p) => {
+    const raw = p.backoff === 'fixed' ? p.baseDelayMs : p.baseDelayMs * 2 ** (retryNumber - 1)
+    return Math.min(raw, p.maxDelayMs)
+}
+
+// Transient = worth trying again. 4xx (except 408/425/429) is permanent.
+const shouldRetry = (status, p) => {
+    if (status === null) return true                       // network error / timeout
+    if (p.retryOnStatus) return p.retryOnStatus.includes(status)
+    return status === 408 || status === 425 || status === 429 || status >= 500
+}
+
+const callStep = async (url, method, timeoutMs) => {
     try {
-        const res = await fetch(url, { method, signal: AbortSignal.timeout(5000) })
+        const res = await fetch(url, { method, signal: AbortSignal.timeout(timeoutMs) })
         let output = null
         try { output = await res.json() } catch { output = null }
-        return { ok: res.ok, output }
-    } catch {
-        return { ok: false, output: null }
+        return { ok: res.ok, status: res.status, output, error: res.ok ? null : `HTTP ${res.status}` }
+    } catch (err) {
+        return {
+            ok: false,
+            status: null,
+            output: null,
+            error: err.name === 'TimeoutError' ? 'Timeout' : err.message
+        }
     }
 }
 
-const runWithRetry = async (url, method, maxRetries = 3, onAttempt) => {
+const runWithRetry = async (url, method, policy, onAttempt) => {
     let attempts = 0
-    for (let a = 0; a <= maxRetries; a++) {
-        if (a > 0) await sleep(1000 * 2 ** (a - 1))   // 1s, 2s, 4s
+    let last = { error: null }
+    for (let a = 0; a <= policy.maxRetries; a++) {
+        if (a > 0) await sleep(delayFor(a, policy))
         attempts++
         if (onAttempt) await onAttempt(attempts)
-        const { ok, output } = await callStep(url, method)
-        if (ok) return { ok: true, attempts, output }
+
+        last = await callStep(url, method, policy.timeoutMs)
+        if (last.ok) return { ok: true, attempts, output: last.output, error: null }
+        if (!shouldRetry(last.status, policy)) break       // permanent error, stop early
     }
-    return { ok: false, attempts, output: null }
+    return { ok: false, attempts, output: null, error: last.error }
 }
 
+// ---------- dead-letter queue ----------
+const sendToDLQ = async (exec, step, reason, error) => {
+    try {
+        const isComp = reason === 'compensation_failed'
+        await DeadLetter.create({
+            companyId: exec.companyId,
+            executionId: exec._id,
+            workflowId: exec.workflowId,
+            nodeId: step.nodeId,
+            stepName: step.name,
+            reason,
+            url: isComp ? step.compensateUrl : step.url,
+            method: isComp ? step.compensateMethod || 'POST' : step.method,
+            attempts: step.attempts,
+            error
+        })
+        console.log(`DLQ: "${step.name}" (${reason})`)
+    } catch (err) {
+        console.error('Could not write to DLQ:', err.message)
+    }
+}
+
+// ---------- conditions ----------
 const getPath = (obj, path) =>
     path.split('.').reduce((o, k) => (o === null || o === undefined ? undefined : o[k]), obj)
 
@@ -50,7 +113,6 @@ const checkCondition = (cond, output) => {
     if (!cond || !cond.field) return true
     const op = cond.op || 'equals'
     const actual = getPath(output, cond.field)
-
     if (actual === undefined) return op === 'notEquals'
 
     switch (op) {
@@ -62,6 +124,7 @@ const checkCondition = (cond, output) => {
     }
 }
 
+// ---------- saga rollback ----------
 const rollback = async (exec, failedIndex) => {
     setExecStatus(exec, 'compensating')
     await persist(exec)
@@ -73,12 +136,16 @@ const rollback = async (exec, failedIndex) => {
         if (!step.compensateUrl) {
             setStepStatus(step, 'compensation_skipped')
         } else {
-            const { ok } = await runWithRetry(
+            const { ok, error } = await runWithRetry(
                 step.compensateUrl,
                 step.compensateMethod || 'POST',
-                step.maxRetries
+                policyOf(step)
             )
             setStepStatus(step, ok ? 'compensated' : 'compensation_failed')
+            if (!ok) {
+                step.error = `Undo failed: ${error}`
+                await sendToDLQ(exec, step, 'compensation_failed', error)
+            }
         }
         await persist(exec)
     }
@@ -89,6 +156,7 @@ const rollback = async (exec, failedIndex) => {
     await persist(exec)
 }
 
+// ---------- main run ----------
 const executeRun = async (executionId) => {
     const exec = await Execution.findById(executionId)
     if (!exec) return
@@ -126,11 +194,10 @@ const executeRun = async (executionId) => {
         step.startedAt = new Date()
         await persist(exec)
 
-        // Live "attempt 2, attempt 3..." updates while retrying
-        const { ok, attempts, output } = await runWithRetry(
+        const { ok, attempts, output, error } = await runWithRetry(
             step.url,
             step.method,
-            step.maxRetries,
+            policyOf(step),
             async (n) => {
                 step.attempts = n
                 if (n > 1) await persist(exec)
@@ -141,10 +208,12 @@ const executeRun = async (executionId) => {
 
         if (!ok) {
             setStepStatus(step, 'failed')
+            step.error = error
             for (let j = i + 1; j < exec.steps.length; j++) {
                 if (exec.steps[j].status === 'pending') setStepStatus(exec.steps[j], 'skipped')
             }
             await persist(exec)
+            await sendToDLQ(exec, step, 'step_failed', error)
             return rollback(exec, i)
         }
 
@@ -173,3 +242,5 @@ const recoverStuckRuns = async () => {
 
 module.exports = executeRun
 module.exports.recoverStuckRuns = recoverStuckRuns
+module.exports.runWithRetry = runWithRetry
+module.exports.policyOf = policyOf

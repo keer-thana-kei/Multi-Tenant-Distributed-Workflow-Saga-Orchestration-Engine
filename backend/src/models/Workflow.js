@@ -1,16 +1,23 @@
 const mongoose = require('mongoose')
 
-// Straight-line step (old format)
+const policyFields = {
+    maxRetries: { type: Number, default: 3 },
+    backoff: { type: String, enum: ['exponential', 'fixed'], default: 'exponential' },
+    baseDelayMs: { type: Number, default: 1000 },
+    maxDelayMs: { type: Number, default: 30000 },
+    timeoutMs: { type: Number, default: 5000 },
+    retryOnStatus: [Number]
+}
+
 const stepSchema = new mongoose.Schema({
     name: { type: String, required: true },
     url: { type: String, required: true },
     method: { type: String, default: 'POST' },
     compensateUrl: String,
     compensateMethod: { type: String, default: 'POST' },
-    maxRetries: { type: Number, default: 3 }
+    ...policyFields
 }, { _id: false })
 
-// Graph node (new format)
 const nodeSchema = new mongoose.Schema({
     id: { type: String, required: true },
     name: { type: String, required: true },
@@ -18,11 +25,10 @@ const nodeSchema = new mongoose.Schema({
     method: { type: String, default: 'POST' },
     compensateUrl: String,
     compensateMethod: { type: String, default: 'POST' },
-    maxRetries: { type: Number, default: 3 },
-    position: mongoose.Schema.Types.Mixed     // {x, y} so the canvas can redraw it
+    position: mongoose.Schema.Types.Mixed,
+    ...policyFields
 }, { _id: false })
 
-// Graph arrow. condition = { field, op, value } (optional)
 const edgeSchema = new mongoose.Schema({
     from: { type: String, required: true },
     to: { type: String, required: true },

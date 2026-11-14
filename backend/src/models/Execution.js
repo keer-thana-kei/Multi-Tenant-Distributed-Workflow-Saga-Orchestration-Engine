@@ -1,13 +1,18 @@
 const mongoose = require('mongoose')
 
 const execStepSchema = new mongoose.Schema({
-    nodeId: String,                       // only set for graph workflows
+    nodeId: String,
     name: String,
     url: String,
     method: String,
     compensateUrl: String,
     compensateMethod: String,
     maxRetries: Number,
+    backoff: String,
+    baseDelayMs: Number,
+    maxDelayMs: Number,
+    timeoutMs: Number,
+    retryOnStatus: [Number],
     status: {
         type: String,
         enum: ['pending', 'running', 'success', 'failed', 'skipped',
@@ -15,7 +20,8 @@ const execStepSchema = new mongoose.Schema({
         default: 'pending'
     },
     attempts: { type: Number, default: 0 },
-    output: mongoose.Schema.Types.Mixed,  // JSON the step returned
+    output: mongoose.Schema.Types.Mixed,
+    error: String,
     startedAt: Date,
     finishedAt: Date
 }, { _id: false })
@@ -29,8 +35,8 @@ const executionSchema = new mongoose.Schema({
         enum: ['pending', 'running', 'success', 'compensating', 'compensated', 'failed'],
         default: 'pending'
     },
-    steps: [execStepSchema],              // stored in safe run order
-    edges: [mongoose.Schema.Types.Mixed], // snapshot of the arrows
+    steps: [execStepSchema],
+    edges: [mongoose.Schema.Types.Mixed],
     startedAt: Date,
     finishedAt: Date
 }, { timestamps: true })

@@ -1,7 +1,14 @@
 const { validateGraph } = require('./graphValidator')
 
+const POLICY_KEYS = ['maxRetries', 'backoff', 'baseDelayMs', 'maxDelayMs', 'timeoutMs', 'retryOnStatus']
+
+const pickPolicy = (n) => {
+    const out = {}
+    for (const k of POLICY_KEYS) if (n[k] !== undefined) out[k] = n[k]
+    return out
+}
+
 const buildExecutionPlan = (wf) => {
-    // Graph workflow
     if (wf.nodes && wf.nodes.length) {
         const nodes = wf.nodes.map((n) => (n.toObject ? n.toObject() : n))
         const edges = (wf.edges || []).map((e) => (e.toObject ? e.toObject() : e))
@@ -21,13 +28,12 @@ const buildExecutionPlan = (wf) => {
                 method: n.method || 'POST',
                 compensateUrl: n.compensateUrl,
                 compensateMethod: n.compensateMethod || 'POST',
-                maxRetries: n.maxRetries ?? 3
+                ...pickPolicy(n)
             }
         })
         return { steps, edges }
     }
 
-    // Straight-line workflow (old behaviour)
     return {
         steps: wf.steps.map((s) => (s.toObject ? s.toObject() : s)),
         edges: []
