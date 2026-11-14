@@ -13,6 +13,7 @@ const eventRoutes = require("./routes/events");
 const { recoverStuckRuns } = require("./engine/executor");
 const { startEventWatcher } = require("./engine/eventWatcher");
 const { attachWebSocket } = require("./engine/wsServer");
+const dlqRoutes = require("./routes/dlq");
 
 const app = express();
 
@@ -33,6 +34,8 @@ app.use("/api/test", testUserRoutes);
 app.use("/api/workflows", workflowRoutes);
 app.use("/api/events", eventRoutes);
 app.use("/mock", require("./routes/mock")); // testing only, remove before deployment
+
+app.use("/api/dlq", dlqRoutes);
 
 // Error handler MUST be last, after every route
 app.use((err, req, res, next) => {
