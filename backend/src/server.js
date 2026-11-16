@@ -1,30 +1,44 @@
-<<<<<<< Updated upstream
-require("dotenv").config();
-=======
 
+// Load environment variables
 require("dotenv").config();
 
->>>>>>> Stashed changes
+const http = require("http");
 const express = require("express");
 const mongoose = require("mongoose");
 const cors = require("cors");
 
+// Routes
 const testUserRoutes = require("./routes/testUser");
 const authRoutes = require("./routes/auth");
 const apiKeyRoutes = require("./routes/apiKeys");
 const workflowRoutes = require("./routes/Workflow");
+const eventRoutes = require("./routes/events");
+const dlqRoutes = require("./routes/dlq");
 
+// Engine services
 const { recoverStuckRuns } = require("./engine/executor");
 const { startEventWatcher } = require("./engine/eventWatcher");
+const { attachWebSocket } = require("./engine/wsServer");
 
+// Initialize Express
 const app = express();
 
-// Check required environment variables
+// Environment configuration
 console.log("Environment configuration:");
-console.log("DEFAULT_TENANT_NAME:", process.env.DEFAULT_TENANT_NAME || "NOT FOUND");
-console.log("JWT_SECRET configured:", Boolean(process.env.JWT_SECRET));
-console.log("MONGODB_URI configured:", Boolean(process.env.MONGODB_URI));
+console.log(
+    "DEFAULT_TENANT_NAME:",
+    process.env.DEFAULT_TENANT_NAME || "NOT FOUND"
+);
+console.log(
+    "JWT_SECRET configured:",
+    Boolean(process.env.JWT_SECRET)
+);
+console.log(
+    "MONGODB_URI configured:",
+    Boolean(process.env.MONGODB_URI)
+);
 
+// Middleware
 app.use(cors());
 app.use(express.json());
 
@@ -35,7 +49,7 @@ app.get("/", (req, res) => {
     });
 });
 
-// Health route
+// Health check route
 app.get("/health", (req, res) => {
     res.json({
         status: "ok",
@@ -43,15 +57,29 @@ app.get("/health", (req, res) => {
     });
 });
 
-// API routes
+// Authentication routes
 app.use("/api/auth", authRoutes);
+
+// API key routes
 app.use("/api/keys", apiKeyRoutes);
+
+// Test user routes
 app.use("/api/test", testUserRoutes);
+
+// Workflow routes
 app.use("/api/workflows", workflowRoutes);
+
+// Event routes
+app.use("/api/events", eventRoutes);
+
+// Mock endpoints for Saga testing
 app.use("/mock", require("./routes/mock"));
-app.use("/api/events", require("./routes/events"));
+
+// Dead Letter Queue routes
+app.use("/api/dlq", dlqRoutes);
 
 // Error handling middleware
+// This must be placed after all routes.
 app.use((err, req, res, next) => {
     if (err.type === "entity.parse.failed") {
         return res.status(400).json({
@@ -69,21 +97,36 @@ app.use((err, req, res, next) => {
 // Server port
 const PORT = process.env.PORT || 5000;
 
+// Create HTTP server
+// WebSocket and Express share the same HTTP server.
+const server = http.createServer(app);
+
+// Attach WebSocket monitoring
+attachWebSocket(server);
+
 // MongoDB connection
 mongoose
     .connect(process.env.MONGODB_URI)
     .then(async () => {
         console.log("MongoDB connected successfully!");
+        console.log("Connected to DB:", mongoose.connection.name);
 
+        // Recover unfinished workflow executions
         await recoverStuckRuns();
 
+        // Start watching database events
         startEventWatcher();
 
-        app.listen(PORT, () => {
-            console.log(`Server running on http://localhost:${PORT}`);
-            console.log("Connected to DB:", mongoose.connection.name);
+        // Start HTTP and WebSocket server
+        server.listen(PORT, () => {
+            console.log(
+                `Server running on http://localhost:${PORT}`
+            );
         });
     })
     .catch((error) => {
-        console.error("MongoDB connection failed:", error.message);
+        console.error(
+            "MongoDB connection failed:",
+            error.message
+        );
     });

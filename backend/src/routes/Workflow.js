@@ -1,39 +1,79 @@
 
 const router = require('express').Router();
-
 const mongoose = require('mongoose');
+
 const Workflow = require('../models/Workflow');
 const Execution = require('../models/Execution');
+
 const executeRun = require('../engine/executor');
+const { validateGraph } = require('../engine/graphValidator');
+const { buildExecutionPlan } = require('../engine/buildPlan');
 
 const {
     tenantAuth,
     tenantRateLimit
 } = require('../middleware/tenant');
 
-// Apply tenant authentication and rate limiting
-// to every route in this file.
+// Apply authentication and tenant rate limiting
 router.use(tenantAuth, tenantRateLimit);
+
+// VALIDATE GRAPH
+router.post('/validate', (req, res) => {
+    const { nodes, edges } = req.body;
+
+    const result = validateGraph(nodes, edges || []);
+    res.json(result);
+});
 
 // CREATE WORKFLOW
 router.post('/', async (req, res, next) => {
     try {
-        const { workflowName, steps, triggerEvent } = req.body;
+        const { workflowName, steps, nodes, edges, triggerEvent } = req.body;
 
-        if (!workflowName || !Array.isArray(steps)) {
+        if (!workflowName) {
             return res.status(400).json({
-                message: 'workflowName and steps are required'
+                message: 'workflowName is required'
+            });
+        }
+
+        // Graph-based workflow
+        if (Array.isArray(nodes) && nodes.length > 0) {
+            const result = validateGraph(nodes, edges || []);
+
+            if (!result.valid) {
+                return res.status(400).json({
+                    message: 'Invalid graph',
+                    errors: result.errors
+                });
+            }
+
+            const workflow = await Workflow.create({
+                companyId: req.tenantId,
+                workflowName,
+                triggerEvent,
+                nodes,
+                edges: edges || []
+            });
+
+            return res.status(201).json(workflow);
+        }
+
+        // Step-based workflow
+        if (!Array.isArray(steps) || steps.length === 0) {
+            return res.status(400).json({
+                message: 'Provide either steps or nodes'
             });
         }
 
         const workflow = await Workflow.create({
             companyId: req.tenantId,
             workflowName,
-            steps,
-            triggerEvent
+            triggerEvent,
+            steps
         });
 
         res.status(201).json(workflow);
+
     } catch (err) {
         next(err);
     }
@@ -73,6 +113,7 @@ router.get('/executions/:execId', async (req, res, next) => {
         }
 
         res.json(execution);
+
     } catch (err) {
         next(err);
     }
@@ -99,6 +140,7 @@ router.get('/:id', async (req, res, next) => {
         }
 
         res.json(workflow);
+
     } catch (err) {
         next(err);
     }
@@ -127,6 +169,7 @@ router.delete('/:id', async (req, res, next) => {
         res.json({
             message: 'Workflow deleted successfully'
         });
+
     } catch (err) {
         next(err);
     }
@@ -152,10 +195,44 @@ router.post('/:id/run', async (req, res, next) => {
             });
         }
 
+        let executionSteps;
+        let executionEdges = [];
+
+        // Graph-based execution
+        if (Array.isArray(workflow.nodes) && workflow.nodes.length > 0) {
+            let plan;
+
+            try {
+                plan = buildExecutionPlan(workflow);
+            } catch (err) {
+                return res.status(400).json({
+                    message: err.message
+                });
+            }
+
+            executionSteps = plan.steps;
+            executionEdges = plan.edges || [];
+
+        } else {
+            // Step-based execution
+            if (!Array.isArray(workflow.steps) || workflow.steps.length === 0) {
+                return res.status(400).json({
+                    message: 'Workflow has no executable steps'
+                });
+            }
+
+            executionSteps = workflow.steps.map(step =>
+                typeof step.toObject === 'function'
+                    ? step.toObject()
+                    : step
+            );
+        }
+
         const execution = await Execution.create({
             companyId: req.tenantId,
             workflowId: workflow._id,
-            steps: workflow.steps.map(step => step.toObject())
+            steps: executionSteps,
+            edges: executionEdges
         });
 
         executeRun(execution._id).catch(err => {
@@ -166,6 +243,7 @@ router.post('/:id/run', async (req, res, next) => {
             message: 'Workflow execution started',
             executionId: execution._id
         });
+
     } catch (err) {
         next(err);
     }

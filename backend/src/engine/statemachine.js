@@ -8,10 +8,11 @@ const EXEC_TRANSITIONS = {
 }
 
 const STEP_TRANSITIONS = {
-    pending: ['running'],
+    pending: ['running', 'skipped'],
     running: ['success', 'failed'],
     success: ['compensated', 'compensation_failed', 'compensation_skipped'],
     failed: [],
+    skipped: [],
     compensated: [],
     compensation_failed: [],
     compensation_skipped: []

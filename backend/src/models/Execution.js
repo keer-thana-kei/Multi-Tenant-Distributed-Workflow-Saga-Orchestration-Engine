@@ -1,19 +1,29 @@
 const mongoose = require('mongoose')
 
 const execStepSchema = new mongoose.Schema({
+    nodeId: String,
     name: String,
+    type: { type: String, default: 'http' },
     url: String,
     method: String,
+    code: String,
     compensateUrl: String,
     compensateMethod: String,
     maxRetries: Number,
+    backoff: String,
+    baseDelayMs: Number,
+    maxDelayMs: Number,
+    timeoutMs: Number,
+    retryOnStatus: [Number],
     status: {
         type: String,
-        enum: ['pending', 'running', 'success', 'failed',
+        enum: ['pending', 'running', 'success', 'failed', 'skipped',
                'compensated', 'compensation_failed', 'compensation_skipped'],
         default: 'pending'
     },
     attempts: { type: Number, default: 0 },
+    output: mongoose.Schema.Types.Mixed,
+    error: String,
     startedAt: Date,
     finishedAt: Date
 }, { _id: false })
@@ -32,6 +42,7 @@ const executionSchema = new mongoose.Schema({
         default: 'pending'
     },
     steps: [execStepSchema],
+    edges: [mongoose.Schema.Types.Mixed],
     startedAt: Date,
     finishedAt: Date
 }, { timestamps: true })
