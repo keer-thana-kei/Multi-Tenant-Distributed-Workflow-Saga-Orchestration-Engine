@@ -1,4 +1,8 @@
+const vm = require('vm')
+
 const VALID_OPS = ['equals', 'notEquals', 'gt', 'lt']
+const NODE_TYPES = ['http', 'script']
+const MAX_CODE_CHARS = 5000
 
 const isHttpUrl = (value) => {
     try {
@@ -9,7 +13,17 @@ const isHttpUrl = (value) => {
     }
 }
 
-// Returns { valid, errors, order }  (order = node ids in safe run order)
+// Compile only (never runs the code) to catch syntax errors early
+const syntaxError = (code) => {
+    try {
+        new vm.Script(`(function (input, event) {\n"use strict";\n${code}\n})`)
+        return null
+    } catch (err) {
+        return err.message
+    }
+}
+
+// Returns { valid, errors, order }
 const validateGraph = (nodes, edges = []) => {
     const errors = []
 
@@ -32,7 +46,23 @@ const validateGraph = (nodes, edges = []) => {
         ids.add(n.id)
 
         if (!n.name) errors.push(`Node ${n.id}: name is required`)
-        if (!isHttpUrl(n.url)) errors.push(`Node ${n.id}: url must be a valid http/https URL`)
+
+        const type = n.type || 'http'
+        if (!NODE_TYPES.includes(type)) {
+            errors.push(`Node ${n.id}: type must be one of ${NODE_TYPES.join(', ')}`)
+        } else if (type === 'script') {
+            if (typeof n.code !== 'string' || !n.code.trim()) {
+                errors.push(`Node ${n.id}: script node needs "code"`)
+            } else if (n.code.length > MAX_CODE_CHARS) {
+                errors.push(`Node ${n.id}: code is longer than ${MAX_CODE_CHARS} characters`)
+            } else {
+                const problem = syntaxError(n.code)
+                if (problem) errors.push(`Node ${n.id}: script syntax error: ${problem}`)
+            }
+        } else if (!isHttpUrl(n.url)) {
+            errors.push(`Node ${n.id}: url must be a valid http/https URL`)
+        }
+
         if (n.compensateUrl && !isHttpUrl(n.compensateUrl)) {
             errors.push(`Node ${n.id}: compensateUrl must be a valid http/https URL`)
         }

@@ -9,6 +9,7 @@ const policyFields = {
     retryOnStatus: [Number]
 }
 
+// Straight-line step (old format, HTTP only)
 const stepSchema = new mongoose.Schema({
     name: { type: String, required: true },
     url: { type: String, required: true },
@@ -18,11 +19,17 @@ const stepSchema = new mongoose.Schema({
     ...policyFields
 }, { _id: false })
 
+// Graph node: "http" calls a URL, "script" runs sandboxed JavaScript
 const nodeSchema = new mongoose.Schema({
     id: { type: String, required: true },
     name: { type: String, required: true },
-    url: { type: String, required: true },
+    type: { type: String, enum: ['http', 'script'], default: 'http' },
+    url: {
+        type: String,
+        required: function () { return this.type !== 'script' }
+    },
     method: { type: String, default: 'POST' },
+    code: String,
     compensateUrl: String,
     compensateMethod: { type: String, default: 'POST' },
     position: mongoose.Schema.Types.Mixed,

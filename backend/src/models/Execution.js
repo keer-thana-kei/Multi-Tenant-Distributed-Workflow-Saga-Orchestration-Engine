@@ -3,8 +3,10 @@ const mongoose = require('mongoose')
 const execStepSchema = new mongoose.Schema({
     nodeId: String,
     name: String,
+    type: { type: String, default: 'http' },
     url: String,
     method: String,
+    code: String,
     compensateUrl: String,
     compensateMethod: String,
     maxRetries: Number,
