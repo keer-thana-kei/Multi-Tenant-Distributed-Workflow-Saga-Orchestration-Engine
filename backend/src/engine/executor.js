@@ -1,7 +1,9 @@
 const Execution = require('../models/Execution')
+const Event = require('../models/Event')
 const DeadLetter = require('../models/DeadLetter')
-const { setExecStatus, setStepStatus } = require('../engine/statemachine')
+const { setExecStatus, setStepStatus } = require('./stateMachine')
 const { publish } = require('./traceBus')
+const { runScript } = require('./sandbox')
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
 const MAX_OUTPUT_CHARS = 10000
@@ -27,7 +29,6 @@ const clamp = (v, min, max, fallback) => {
     return Math.min(max, Math.max(min, n))
 }
 
-// Safe limits so a tenant cannot ask for 1,000,000 retries
 const policyOf = (step) => ({
     maxRetries: clamp(step.maxRetries, 0, 10, 3),
     backoff: step.backoff === 'fixed' ? 'fixed' : 'exponential',
@@ -45,9 +46,8 @@ const delayFor = (retryNumber, p) => {
     return Math.min(raw, p.maxDelayMs)
 }
 
-// Transient = worth trying again. 4xx (except 408/425/429) is permanent.
 const shouldRetry = (status, p) => {
-    if (status === null) return true                       // network error / timeout
+    if (status === null) return true
     if (p.retryOnStatus) return p.retryOnStatus.includes(status)
     return status === 408 || status === 425 || status === 429 || status >= 500
 }
@@ -78,9 +78,30 @@ const runWithRetry = async (url, method, policy, onAttempt) => {
 
         last = await callStep(url, method, policy.timeoutMs)
         if (last.ok) return { ok: true, attempts, output: last.output, error: null }
-        if (!shouldRetry(last.status, policy)) break       // permanent error, stop early
+        if (!shouldRetry(last.status, policy)) break
     }
     return { ok: false, attempts, output: null, error: last.error }
+}
+
+// ---------- script nodes ----------
+// input.outputs.<nodeId> = output of each successful step
+// input.last             = output of the most recent successful step
+const buildScriptInput = (exec) => {
+    const outputs = {}
+    let last = null
+    for (const s of exec.steps) {
+        if (s.status === 'success' && s.nodeId) {
+            outputs[s.nodeId] = s.output ?? null
+            last = s.output ?? null
+        }
+    }
+    return { outputs, last }
+}
+
+const loadEventPayload = async (exec) => {
+    if (!exec.eventId) return {}
+    const ev = await Event.findOne({ _id: exec.eventId, companyId: exec.companyId })
+    return ev && ev.payload ? ev.payload : {}
 }
 
 // ---------- dead-letter queue ----------
@@ -168,6 +189,10 @@ const executeRun = async (executionId) => {
     const isGraph = exec.steps.some((s) => s.nodeId)
     const byNodeId = new Map(exec.steps.filter((s) => s.nodeId).map((s) => [s.nodeId, s]))
 
+    // Only load the event if a script might need it
+    const hasScript = exec.steps.some((s) => s.type === 'script')
+    const eventPayload = hasScript ? await loadEventPayload(exec) : {}
+
     for (let i = 0; i < exec.steps.length; i++) {
         const step = exec.steps[i]
 
@@ -194,15 +219,29 @@ const executeRun = async (executionId) => {
         step.startedAt = new Date()
         await persist(exec)
 
-        const { ok, attempts, output, error } = await runWithRetry(
-            step.url,
-            step.method,
-            policyOf(step),
-            async (n) => {
-                step.attempts = n
-                if (n > 1) await persist(exec)
-            }
-        )
+        let result
+        if (step.type === 'script') {
+            // Scripts are deterministic, so retrying would not help: one attempt
+            const r = await runScript(
+                step.code,
+                buildScriptInput(exec),
+                eventPayload,
+                Math.min(policyOf(step).timeoutMs, 3000)
+            )
+            result = { ok: r.ok, attempts: 1, output: r.output, error: r.error }
+        } else {
+            result = await runWithRetry(
+                step.url,
+                step.method,
+                policyOf(step),
+                async (n) => {
+                    step.attempts = n
+                    if (n > 1) await persist(exec)
+                }
+            )
+        }
+
+        const { ok, attempts, output, error } = result
         step.attempts = attempts
         step.finishedAt = new Date()
 

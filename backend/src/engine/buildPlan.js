@@ -24,8 +24,10 @@ const buildExecutionPlan = (wf) => {
             return {
                 nodeId: n.id,
                 name: n.name,
+                type: n.type || 'http',
                 url: n.url,
                 method: n.method || 'POST',
+                code: n.code,
                 compensateUrl: n.compensateUrl,
                 compensateMethod: n.compensateMethod || 'POST',
                 ...pickPolicy(n)
