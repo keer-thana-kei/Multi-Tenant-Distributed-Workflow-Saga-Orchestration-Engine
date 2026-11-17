@@ -72,6 +72,9 @@ app.use("/api/workflows", workflowRoutes);
 // Event routes
 app.use("/api/events", eventRoutes);
 
+// Monitoring statistics routes
+app.use("/api/stats", require("./routes/stats"));
+
 // Mock endpoints for Saga testing
 app.use("/mock", require("./routes/mock"));
 
