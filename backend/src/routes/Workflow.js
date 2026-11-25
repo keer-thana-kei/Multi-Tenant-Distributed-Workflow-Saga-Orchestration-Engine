@@ -7,68 +7,50 @@ const { validateGraph } = require('../engine/graphValidator')
 const { buildExecutionPlan } = require('../engine/buildPlan')
 const { tenantAuth, tenantRateLimit } = require('../middleware/tenant')
 
-const router = require('express').Router();
-const mongoose = require('mongoose');
+router.use(tenantAuth, tenantRateLimit)
 
 const isId = (id) => mongoose.Types.ObjectId.isValid(id)
 
 // Check a graph without saving it (the canvas calls this live)
 router.post('/validate', (req, res) => {
-    const { nodes, edges } = req.body;
-
-    const result = validateGraph(nodes, edges || []);
-    res.json(result);
-});
+    const { nodes, edges } = req.body
+    const result = validateGraph(nodes, edges || [])
+    res.json(result)
+})
 
 // Create
 router.post('/', async (req, res, next) => {
     try {
-        const { workflowName, steps, nodes, edges, triggerEvent } = req.body;
-
-        if (!workflowName) {
-            return res.status(400).json({
-                message: 'workflowName is required'
-            });
-        }
-
-        // Graph-based workflow
-        if (Array.isArray(nodes) && nodes.length > 0) {
-            const result = validateGraph(nodes, edges || []);
+        const { workflowName, steps, nodes, edges, triggerEvent } = req.body
+        if (!workflowName) return res.status(400).json({ message: 'workflowName is required' })
 
         if (Array.isArray(nodes) && nodes.length) {
             const result = validateGraph(nodes, edges || [])
             if (!result.valid) {
-                return res.status(400).json({
-                    message: 'Invalid graph',
-                    errors: result.errors
-                });
+                return res.status(400).json({ message: 'Invalid graph', errors: result.errors })
             }
-
             const workflow = await Workflow.create({
                 companyId: req.tenantId,
                 workflowName,
                 triggerEvent,
                 nodes,
                 edges: edges || []
-            });
-
-            return res.status(201).json(workflow);
+            })
+            return res.status(201).json(workflow)
         }
 
         if (!Array.isArray(steps) || steps.length === 0) {
-            return res.status(400).json({
-                message: 'Provide either steps or nodes'
-            });
+            return res.status(400).json({ message: 'Provide either "steps" or "nodes"' })
         }
-
         const workflow = await Workflow.create({
             companyId: req.tenantId,
             workflowName,
             triggerEvent,
             steps
-        });
-
-        res.status(201).json(workflow);
+        })
+        res.status(201).json(workflow)
+    } catch (err) { next(err) }
+})
 
 // List workflows
 router.get('/', async (req, res, next) => {
@@ -203,23 +185,15 @@ router.post('/:id/run', async (req, res, next) => {
 
         const execution = await Execution.create({
             companyId: req.tenantId,
-            workflowId: workflow._id,
-            steps: executionSteps,
-            edges: executionEdges
-        });
+            workflowId: wf._id,
+            steps: plan.steps,
+            edges: plan.edges
+        })
 
-        executeRun(execution._id).catch(err => {
-            console.error('Engine crashed:', err);
-        });
+        executeRun(execution._id).catch((err) => console.error('Engine crashed:', err))
 
-        res.status(202).json({
-            message: 'Workflow execution started',
-            executionId: execution._id
-        });
+        res.status(202).json({ executionId: execution._id })
+    } catch (err) { next(err) }
+})
 
-    } catch (err) {
-        next(err);
-    }
-});
-
-module.exports = router;
+module.exports = router

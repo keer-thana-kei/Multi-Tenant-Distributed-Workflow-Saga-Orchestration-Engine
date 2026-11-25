@@ -1,4 +1,3 @@
-
 const mongoose = require("mongoose");
 
 const userSchema = new mongoose.Schema(
@@ -25,23 +24,15 @@ const userSchema = new mongoose.Schema(
 
     password: {
       type: String,
-<<<<<<< Updated upstream
-      required: true
-=======
       required: [true, "Password is required"],
       select: false
->>>>>>> Stashed changes
     },
 
     tenantId: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "Tenant",
-<<<<<<< Updated upstream
-      required: true
-=======
       required: [true, "Tenant ID is required"],
       index: true
->>>>>>> Stashed changes
     }
   },
   { timestamps: true }

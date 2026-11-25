@@ -1,38 +1,24 @@
-
 const express = require("express");
 const bcrypt = require("bcrypt");
 const jwt = require("jsonwebtoken");
 
 const User = require("../models/User");
 const Tenant = require("../models/Tenant");
-<<<<<<< Updated upstream
-=======
 
->>>>>>> Stashed changes
 const router = express.Router();
 
 // ===============================
 // VALIDATION HELPERS
 // ===============================
 
-// Validate email format
-const isValidEmail = (email) => {
-    return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
-};
+const isValidEmail = (email) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
 
-// Validate password
-const isValidPassword = (password) => {
-    return (
-        typeof password === "string" &&
-        password.length >= 8 &&
-        Buffer.byteLength(password, "utf8") <= 72
-    );
-};
+const isValidPassword = (password) =>
+    typeof password === "string" &&
+    password.length >= 8 &&
+    Buffer.byteLength(password, "utf8") <= 72;
 
-// Escape special characters for regular expression
-const escapeRegex = (value) => {
-    return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-};
+const escapeRegex = (value) => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
 // ===============================
 // DEFAULT TENANT
@@ -54,9 +40,7 @@ async function getDefaultTenant() {
     });
 
     if (!tenant) {
-        throw new Error(
-            `Active tenant '${tenantName}' not found`
-        );
+        throw new Error(`Active tenant '${tenantName}' not found`);
     }
 
     return tenant;
@@ -80,9 +64,7 @@ const generateToken = (user) => {
             tenantId: user.tenantId.toString()
         },
         secret,
-        {
-            expiresIn: "1h"
-        }
+        { expiresIn: "1h" }
     );
 };
 
@@ -94,7 +76,6 @@ router.post("/register", async (req, res) => {
     try {
         const { name, email, password } = req.body || {};
 
-        // Check required fields
         if (!name || !email || !password) {
             return res.status(400).json({
                 success: false,
@@ -102,7 +83,6 @@ router.post("/register", async (req, res) => {
             });
         }
 
-        // Validate name
         if (
             typeof name !== "string" ||
             name.trim().length < 2 ||
@@ -114,18 +94,13 @@ router.post("/register", async (req, res) => {
             });
         }
 
-        // Validate email
-        if (
-            typeof email !== "string" ||
-            !isValidEmail(email.trim())
-        ) {
+        if (typeof email !== "string" || !isValidEmail(email.trim())) {
             return res.status(400).json({
                 success: false,
                 message: "Please enter a valid email address"
             });
         }
 
-        // Validate password
         if (!isValidPassword(password)) {
             return res.status(400).json({
                 success: false,
@@ -136,11 +111,7 @@ router.post("/register", async (req, res) => {
 
         const normalizedEmail = email.trim().toLowerCase();
 
-        // Check existing user
-        const existingUser = await User.findOne({
-            email: normalizedEmail
-        });
-
+        const existingUser = await User.findOne({ email: normalizedEmail });
         if (existingUser) {
             return res.status(409).json({
                 success: false,
@@ -148,13 +119,9 @@ router.post("/register", async (req, res) => {
             });
         }
 
-        // Find configured active tenant
         const tenant = await getDefaultTenant();
-
-        // Hash password
         const hashedPassword = await bcrypt.hash(password, 12);
 
-        // Create user
         const user = await User.create({
             name: name.trim(),
             email: normalizedEmail,
@@ -162,7 +129,6 @@ router.post("/register", async (req, res) => {
             tenantId: tenant._id
         });
 
-        // Generate JWT
         const token = generateToken(user);
 
         return res.status(201).json({
@@ -176,101 +142,37 @@ router.post("/register", async (req, res) => {
                 tenantId: user.tenantId
             }
         });
-
     } catch (error) {
-       console.error("Registration error:", error);
+        console.error("Registration error:", error);
 
-      if (error.code === 11000) {
-          return res.status(409).json({
-              success: false,
-             message: "An account with this email already exists"
-         });
-     }
+        if (error.code === 11000) {
+            return res.status(409).json({
+                success: false,
+                message: "An account with this email already exists"
+            });
+        }
 
-      if (error.name === "ValidationError") {
-          return res.status(400).json({
+        if (error.name === "ValidationError") {
+            return res.status(400).json({
+                success: false,
+                message: error.message
+            });
+        }
+
+        if (error.name === "MongoServerError") {
+            return res.status(500).json({
+                success: false,
+                message: "Database operation failed"
+            });
+        }
+
+        // Temporary local debugging: remove "error" before deployment
+        return res.status(500).json({
             success: false,
-            message: error.message
-         });
-      }
-
-      if (error.name === "MongoServerError") {
-          return res.status(500).json({
-            success: false,
-            message: "Database operation failed"
-          });
-      }
-
-    // Temporary local debugging
-      return res.status(500).json({
-          success: false,
-         message: "Registration failed",
-         error: error.message
-      });
+            message: "Registration failed",
+            error: error.message
+        });
     }
-<<<<<<< Updated upstream
-
-    const existingUser = await User.findOne({ email });
-
-    if (existingUser) {
-      return res.status(409).json({
-        message: "User already exists"
-      });
-    }
-
-    // Find the active workflow-engine tenant
-    const tenant = await Tenant.findOne({
-       name: "workflow-engine",
-        active: true
-    });
-
-    if (!tenant) {
-      return res.status(404).json({
-         message: "Workflow-engine tenant not found"
-      });
-    }
-
-  // Hash password
-    const hashedPassword = await bcrypt.hash(password, 10);
-
-  // Create user with tenant ID
-    const user = await User.create({
-      name,
-      email,
-      password: hashedPassword,
-      tenantId: tenant._id
-    });
-
-    const token = jwt.sign(
-    {
-      userId: user._id,
-      email: user.email,
-      tenantId: user.tenantId
-    },
-    process.env.JWT_SECRET,
-    {
-      expiresIn: "1h"
-    }
-    );
-
-    res.status(201).json({
-      message: "Registration successful",
-      token,
-      user: {
-        id: user._id,
-        name: user.name,
-        email: user.email
-      }
-    });
-  } catch (error) {
-    console.error(error);
-
-    res.status(500).json({
-      message: "Registration failed"
-    });
-  }
-=======
->>>>>>> Stashed changes
 });
 
 // ===============================
@@ -281,7 +183,6 @@ router.post("/login", async (req, res) => {
     try {
         const { email, password } = req.body || {};
 
-        // Check required fields
         if (
             typeof email !== "string" ||
             typeof password !== "string" ||
@@ -294,7 +195,6 @@ router.post("/login", async (req, res) => {
             });
         }
 
-        // Validate email
         if (!isValidEmail(email.trim())) {
             return res.status(400).json({
                 success: false,
@@ -302,7 +202,6 @@ router.post("/login", async (req, res) => {
             });
         }
 
-        // Validate password length
         if (Buffer.byteLength(password, "utf8") > 72) {
             return res.status(401).json({
                 success: false,
@@ -312,11 +211,7 @@ router.post("/login", async (req, res) => {
 
         const normalizedEmail = email.trim().toLowerCase();
 
-        // Retrieve password explicitly
-        const user = await User.findOne({
-            email: normalizedEmail
-        }).select("+password");
-
+        const user = await User.findOne({ email: normalizedEmail }).select("+password");
         if (!user) {
             return res.status(401).json({
                 success: false,
@@ -324,12 +219,7 @@ router.post("/login", async (req, res) => {
             });
         }
 
-        // Compare password
-        const passwordMatch = await bcrypt.compare(
-            password,
-            user.password
-        );
-
+        const passwordMatch = await bcrypt.compare(password, user.password);
         if (!passwordMatch) {
             return res.status(401).json({
                 success: false,
@@ -337,12 +227,7 @@ router.post("/login", async (req, res) => {
             });
         }
 
-        // Check whether user's tenant is active
-        const tenant = await Tenant.findOne({
-            _id: user.tenantId,
-            active: true
-        });
-
+        const tenant = await Tenant.findOne({ _id: user.tenantId, active: true });
         if (!tenant) {
             return res.status(403).json({
                 success: false,
@@ -350,7 +235,6 @@ router.post("/login", async (req, res) => {
             });
         }
 
-        // Generate JWT
         const token = generateToken(user);
 
         return res.status(200).json({
@@ -364,7 +248,6 @@ router.post("/login", async (req, res) => {
                 tenantId: user.tenantId
             }
         });
-
     } catch (error) {
         console.error("Login error:", error);
 
@@ -373,53 +256,6 @@ router.post("/login", async (req, res) => {
             message: "Login failed"
         });
     }
-<<<<<<< Updated upstream
-
-    const passwordMatch = await bcrypt.compare(
-      password,
-      user.password
-    );
-
-    if (!passwordMatch) {
-      return res.status(401).json({
-        message: "Invalid email or password"
-      });
-    }
-
-    const token = jwt.sign(
-      {
-        userId: user._id,
-        email: user.email,
-        tenantId: user.tenantId
-      },
-      process.env.JWT_SECRET,
-      {
-        expiresIn: "1h"
-      }
-    );
-
-    res.json({
-      message: "Login successful",
-      token,
-      user: {
-        id: user._id,
-        name: user.name,
-        email: user.email
-      }
-    });
-  } catch (error) {
-    console.error(error);
-
-    res.status(500).json({
-      message: "Login failed"
-    });
-  }
-=======
->>>>>>> Stashed changes
 });
-
-// ===============================
-// EXPORT ROUTER
-// ===============================
 
 module.exports = router;
