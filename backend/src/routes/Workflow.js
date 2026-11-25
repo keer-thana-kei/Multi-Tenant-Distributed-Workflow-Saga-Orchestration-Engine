@@ -1,23 +1,18 @@
+const router = require('express').Router()
+const mongoose = require('mongoose')
+const Workflow = require('../models/Workflow')
+const Execution = require('../models/Execution')
+const executeRun = require('../engine/executor')
+const { validateGraph } = require('../engine/graphValidator')
+const { buildExecutionPlan } = require('../engine/buildPlan')
+const { tenantAuth, tenantRateLimit } = require('../middleware/tenant')
 
 const router = require('express').Router();
 const mongoose = require('mongoose');
 
-const Workflow = require('../models/Workflow');
-const Execution = require('../models/Execution');
+const isId = (id) => mongoose.Types.ObjectId.isValid(id)
 
-const executeRun = require('../engine/executor');
-const { validateGraph } = require('../engine/graphValidator');
-const { buildExecutionPlan } = require('../engine/buildPlan');
-
-const {
-    tenantAuth,
-    tenantRateLimit
-} = require('../middleware/tenant');
-
-// Apply authentication and tenant rate limiting
-router.use(tenantAuth, tenantRateLimit);
-
-// VALIDATE GRAPH
+// Check a graph without saving it (the canvas calls this live)
 router.post('/validate', (req, res) => {
     const { nodes, edges } = req.body;
 
@@ -25,7 +20,7 @@ router.post('/validate', (req, res) => {
     res.json(result);
 });
 
-// CREATE WORKFLOW
+// Create
 router.post('/', async (req, res, next) => {
     try {
         const { workflowName, steps, nodes, edges, triggerEvent } = req.body;
@@ -40,6 +35,8 @@ router.post('/', async (req, res, next) => {
         if (Array.isArray(nodes) && nodes.length > 0) {
             const result = validateGraph(nodes, edges || []);
 
+        if (Array.isArray(nodes) && nodes.length) {
+            const result = validateGraph(nodes, edges || [])
             if (!result.valid) {
                 return res.status(400).json({
                     message: 'Invalid graph',
@@ -58,7 +55,6 @@ router.post('/', async (req, res, next) => {
             return res.status(201).json(workflow);
         }
 
-        // Step-based workflow
         if (!Array.isArray(steps) || steps.length === 0) {
             return res.status(400).json({
                 message: 'Provide either steps or nodes'
@@ -74,158 +70,135 @@ router.post('/', async (req, res, next) => {
 
         res.status(201).json(workflow);
 
-    } catch (err) {
-        next(err);
-    }
-});
-
-// GET ALL WORKFLOWS FOR LOGGED-IN TENANT
+// List workflows
 router.get('/', async (req, res, next) => {
     try {
-        const workflows = await Workflow.find({
-            companyId: req.tenantId
-        });
+        res.json(await Workflow.find({ companyId: req.tenantId }).sort({ updatedAt: -1 }))
+    } catch (err) { next(err) }
+})
 
-        res.json(workflows);
-    } catch (err) {
-        next(err);
-    }
-});
+// ---- Run history (must be BEFORE /:id and /executions/:execId)
+// Optional filters: ?workflowId=...&status=success&limit=20&page=1
+router.get('/executions', async (req, res, next) => {
+    try {
+        const filter = { companyId: req.tenantId }
 
-// GET EXECUTION BY ID
+        if (req.query.workflowId) {
+            if (!isId(req.query.workflowId)) {
+                return res.status(400).json({ message: 'Invalid workflowId' })
+            }
+            filter.workflowId = req.query.workflowId
+        }
+        if (req.query.status) filter.status = req.query.status
+
+        const limit = Math.min(Math.max(parseInt(req.query.limit) || 20, 1), 100)
+        const page = Math.max(parseInt(req.query.page) || 1, 1)
+
+        const [items, total] = await Promise.all([
+            Execution.find(filter)
+                .select('workflowId status startedAt finishedAt createdAt steps.nodeId steps.name steps.status')
+                .sort({ createdAt: -1 })
+                .skip((page - 1) * limit)
+                .limit(limit)
+                .lean(),
+            Execution.countDocuments(filter)
+        ])
+
+        res.json({ items, total, page, limit })
+    } catch (err) { next(err) }
+})
+
+// One execution (full detail)
 router.get('/executions/:execId', async (req, res, next) => {
     try {
-        if (!mongoose.Types.ObjectId.isValid(req.params.execId)) {
-            return res.status(400).json({
-                message: 'Invalid execution ID'
-            });
-        }
+        if (!isId(req.params.execId)) return res.status(404).json({ message: 'Execution not found' })
+        const ex = await Execution.findOne({ _id: req.params.execId, companyId: req.tenantId })
+        if (!ex) return res.status(404).json({ message: 'Execution not found' })
+        res.json(ex)
+    } catch (err) { next(err) }
+})
 
-        const execution = await Execution.findOne({
-            _id: req.params.execId,
-            companyId: req.tenantId
-        });
-
-        if (!execution) {
-            return res.status(404).json({
-                message: 'Execution not found'
-            });
-        }
-
-        res.json(execution);
-
-    } catch (err) {
-        next(err);
-    }
-});
-
-// GET SINGLE WORKFLOW
+// One workflow
 router.get('/:id', async (req, res, next) => {
     try {
-        if (!mongoose.Types.ObjectId.isValid(req.params.id)) {
-            return res.status(400).json({
-                message: 'Invalid workflow ID'
-            });
+        if (!isId(req.params.id)) return res.status(404).json({ message: 'Workflow not found' })
+        const wf = await Workflow.findOne({ _id: req.params.id, companyId: req.tenantId })
+        if (!wf) return res.status(404).json({ message: 'Workflow not found' })
+        res.json(wf)
+    } catch (err) { next(err) }
+})
+
+// Update (edit a saved workflow). Send any of:
+// workflowName, triggerEvent, nodes + edges (graph) or steps (straight-line)
+router.put('/:id', async (req, res, next) => {
+    try {
+        if (!isId(req.params.id)) return res.status(404).json({ message: 'Workflow not found' })
+
+        const wf = await Workflow.findOne({ _id: req.params.id, companyId: req.tenantId })
+        if (!wf) return res.status(404).json({ message: 'Workflow not found' })
+
+        const { workflowName, triggerEvent, nodes, edges, steps } = req.body
+
+        if (workflowName !== undefined) {
+            if (!workflowName) return res.status(400).json({ message: 'workflowName cannot be empty' })
+            wf.workflowName = workflowName
+        }
+        if (triggerEvent !== undefined) wf.triggerEvent = triggerEvent || undefined
+
+        if (nodes !== undefined) {
+            if (!Array.isArray(nodes) || nodes.length === 0) {
+                return res.status(400).json({ message: 'nodes must be a non-empty array' })
+            }
+            const result = validateGraph(nodes, edges || [])
+            if (!result.valid) {
+                return res.status(400).json({ message: 'Invalid graph', errors: result.errors })
+            }
+            wf.nodes = nodes
+            wf.edges = edges || []
+            wf.steps = []                    // a workflow is either a graph or steps
+        } else if (steps !== undefined) {
+            if (!Array.isArray(steps) || steps.length === 0) {
+                return res.status(400).json({ message: 'steps must be a non-empty array' })
+            }
+            wf.steps = steps
+            wf.nodes = []
+            wf.edges = []
+        } else if (edges !== undefined) {
+            return res.status(400).json({ message: 'Send "nodes" together with "edges"' })
         }
 
-        const workflow = await Workflow.findOne({
-            _id: req.params.id,
-            companyId: req.tenantId
-        });
-
-        if (!workflow) {
-            return res.status(404).json({
-                message: 'Workflow not found'
-            });
-        }
-
-        res.json(workflow);
-
+        await wf.save()
+        res.json(wf)
     } catch (err) {
-        next(err);
+        if (err.name === 'ValidationError') {
+            return res.status(400).json({ message: err.message })
+        }
+        next(err)
     }
-});
+})
 
-// DELETE WORKFLOW
+// Delete
 router.delete('/:id', async (req, res, next) => {
     try {
-        if (!mongoose.Types.ObjectId.isValid(req.params.id)) {
-            return res.status(400).json({
-                message: 'Invalid workflow ID'
-            });
-        }
+        if (!isId(req.params.id)) return res.status(404).json({ message: 'Workflow not found' })
+        const wf = await Workflow.findOneAndDelete({ _id: req.params.id, companyId: req.tenantId })
+        if (!wf) return res.status(404).json({ message: 'Workflow not found' })
+        res.json({ message: 'Deleted' })
+    } catch (err) { next(err) }
+})
 
-        const workflow = await Workflow.findOneAndDelete({
-            _id: req.params.id,
-            companyId: req.tenantId
-        });
-
-        if (!workflow) {
-            return res.status(404).json({
-                message: 'Workflow not found'
-            });
-        }
-
-        res.json({
-            message: 'Workflow deleted successfully'
-        });
-
-    } catch (err) {
-        next(err);
-    }
-});
-
-// RUN WORKFLOW
+// Run
 router.post('/:id/run', async (req, res, next) => {
     try {
-        if (!mongoose.Types.ObjectId.isValid(req.params.id)) {
-            return res.status(400).json({
-                message: 'Invalid workflow ID'
-            });
-        }
+        if (!isId(req.params.id)) return res.status(404).json({ message: 'Workflow not found' })
+        const wf = await Workflow.findOne({ _id: req.params.id, companyId: req.tenantId })
+        if (!wf) return res.status(404).json({ message: 'Workflow not found' })
 
-        const workflow = await Workflow.findOne({
-            _id: req.params.id,
-            companyId: req.tenantId
-        });
-
-        if (!workflow) {
-            return res.status(404).json({
-                message: 'Workflow not found'
-            });
-        }
-
-        let executionSteps;
-        let executionEdges = [];
-
-        // Graph-based execution
-        if (Array.isArray(workflow.nodes) && workflow.nodes.length > 0) {
-            let plan;
-
-            try {
-                plan = buildExecutionPlan(workflow);
-            } catch (err) {
-                return res.status(400).json({
-                    message: err.message
-                });
-            }
-
-            executionSteps = plan.steps;
-            executionEdges = plan.edges || [];
-
-        } else {
-            // Step-based execution
-            if (!Array.isArray(workflow.steps) || workflow.steps.length === 0) {
-                return res.status(400).json({
-                    message: 'Workflow has no executable steps'
-                });
-            }
-
-            executionSteps = workflow.steps.map(step =>
-                typeof step.toObject === 'function'
-                    ? step.toObject()
-                    : step
-            );
+        let plan
+        try {
+            plan = buildExecutionPlan(wf)
+        } catch (err) {
+            return res.status(400).json({ message: err.message })
         }
 
         const execution = await Execution.create({
