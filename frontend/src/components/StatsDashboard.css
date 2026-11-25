@@ -1,0 +1,418 @@
+/* StatsDashboard.css — dark theme matching MonitoringDashboard.css */
+.stats-container {
+  --bg-base: #0f172a;
+  --bg-surface: #1e293b;
+  --bg-card: #243248;
+  --text-main: #f8fafc;
+  --text-muted: #94a3b8;
+  --border-color: #334155;
+  --status-healthy: #10b981;
+  --status-degraded: #f59e0b;
+  --status-down: #ef4444;
+  --status-unknown: #6b7280;
+  --accent-blue: #3b82f6;
+
+  background-color: var(--bg-base);
+  color: var(--text-main);
+  padding: 1.5rem;
+  border-radius: 8px;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  line-height: 1.5;
+  box-sizing: border-box;
+  text-align: left;
+  min-height: 100vh;
+}
+
+/* ── Header ── */
+.stats-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 1rem;
+  margin-bottom: 1.5rem;
+  padding-bottom: 1rem;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.stats-title {
+  font-size: 1.5rem;
+  font-weight: 700;
+  margin: 0;
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  color: var(--text-main);
+}
+
+.stats-subtitle {
+  font-size: 0.875rem;
+  color: var(--text-muted);
+  margin: 0.25rem 0 0;
+}
+
+/* ── API Key Bar ── */
+.api-key-bar {
+  background: var(--bg-surface);
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  padding: 0.75rem 1rem;
+  margin-bottom: 1.5rem;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  align-items: center;
+}
+
+.api-key-bar label {
+  font-size: 0.8125rem;
+  color: var(--text-muted);
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.api-key-bar input[type="text"],
+.api-key-bar input[type="password"] {
+  flex: 1;
+  min-width: 200px;
+  background: var(--bg-base);
+  color: var(--text-main);
+  border: 1px solid var(--border-color);
+  padding: 0.4rem 0.6rem;
+  border-radius: 4px;
+  font-size: 0.8125rem;
+  font-family: monospace;
+  outline: none;
+}
+
+.api-key-bar input:focus {
+  border-color: var(--accent-blue);
+}
+
+.api-key-toggle {
+  background: transparent;
+  border: 1px solid var(--border-color);
+  color: var(--text-muted);
+  padding: 0.35rem 0.6rem;
+  border-radius: 4px;
+  font-size: 0.75rem;
+  cursor: pointer;
+}
+
+.api-key-toggle:hover {
+  color: var(--text-main);
+  border-color: var(--accent-blue);
+}
+
+/* ── Filters Bar ── */
+.stats-filter-bar {
+  background: var(--bg-surface);
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  padding: 1rem;
+  margin-bottom: 1.5rem;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1rem;
+  align-items: center;
+}
+
+.stats-filter-group {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.8125rem;
+}
+
+.stats-filter-group label {
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+.stats-filter-input {
+  background: var(--bg-base);
+  color: var(--text-main);
+  border: 1px solid var(--border-color);
+  padding: 0.35rem 0.6rem;
+  border-radius: 4px;
+  font-size: 0.8125rem;
+  outline: none;
+}
+
+.stats-filter-input:focus {
+  border-color: var(--accent-blue);
+}
+
+.stats-refresh-btn {
+  background: var(--accent-blue);
+  color: #fff;
+  border: none;
+  padding: 0.4rem 1rem;
+  border-radius: 4px;
+  font-size: 0.8125rem;
+  font-weight: 600;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.stats-refresh-btn:hover {
+  opacity: 0.9;
+}
+
+.stats-refresh-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* ── Summary Cards Grid ── */
+.stats-summary-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 1rem;
+  margin-bottom: 1.5rem;
+}
+
+.stats-card {
+  background: var(--bg-surface);
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  padding: 1.25rem;
+  position: relative;
+}
+
+.stats-card-title {
+  font-size: 0.8125rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-muted);
+  margin-bottom: 0.5rem;
+  font-weight: 600;
+}
+
+.stats-card-value {
+  font-size: 1.75rem;
+  font-weight: 700;
+  display: flex;
+  align-items: baseline;
+  gap: 0.4rem;
+}
+
+.stats-card-subtitle {
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  margin-top: 0.25rem;
+}
+
+/* Rate progress bar */
+.rate-bar-track {
+  width: 100%;
+  height: 6px;
+  background: var(--bg-base);
+  border-radius: 3px;
+  margin-top: 0.5rem;
+  overflow: hidden;
+}
+
+.rate-bar-fill {
+  height: 100%;
+  border-radius: 3px;
+  transition: width 0.4s ease;
+}
+
+/* ── Section Wrapper ── */
+.stats-section {
+  background: var(--bg-surface);
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  padding: 1.25rem;
+  margin-bottom: 1.5rem;
+}
+
+.stats-section-title {
+  font-size: 0.8125rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-muted);
+  margin-bottom: 1rem;
+  font-weight: 600;
+}
+
+/* ── Charts Grid ── */
+.stats-charts-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(400px, 1fr));
+  gap: 1.5rem;
+  margin-bottom: 1.5rem;
+}
+
+@media (max-width: 860px) {
+  .stats-charts-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* ── SVG Charts ── */
+.stats-chart-svg {
+  width: 100%;
+  height: auto;
+  display: block;
+}
+
+.stats-chart-svg text {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+}
+
+/* ── Heatmap ── */
+.heatmap-wrapper {
+  overflow-x: auto;
+}
+
+.heatmap-cell {
+  stroke: var(--bg-surface);
+  stroke-width: 2;
+  rx: 3;
+  ry: 3;
+}
+
+.heatmap-cell:hover {
+  stroke: var(--accent-blue);
+  stroke-width: 2;
+}
+
+/* ── Heatmap Tooltip ── */
+.heatmap-tooltip {
+  position: absolute;
+  background: var(--bg-card);
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+  padding: 0.3rem 0.6rem;
+  font-size: 0.75rem;
+  color: var(--text-main);
+  pointer-events: none;
+  white-space: nowrap;
+  z-index: 10;
+}
+
+/* ── Donut center text ── */
+.donut-center-value {
+  font-size: 1.5rem;
+  font-weight: 700;
+  fill: var(--text-main);
+}
+
+.donut-center-label {
+  font-size: 0.7rem;
+  fill: var(--text-muted);
+  text-transform: uppercase;
+}
+
+/* ── Legend ── */
+.chart-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1rem;
+  margin-top: 0.75rem;
+  font-size: 0.8rem;
+}
+
+.legend-item {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  color: var(--text-muted);
+}
+
+.legend-swatch {
+  width: 12px;
+  height: 12px;
+  border-radius: 3px;
+  flex-shrink: 0;
+}
+
+/* ── Loading / Error / Empty ── */
+.stats-loading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.75rem;
+  padding: 3rem 1rem;
+  color: var(--text-muted);
+  font-size: 0.875rem;
+}
+
+.stats-spinner {
+  width: 24px;
+  height: 24px;
+  border: 3px solid var(--border-color);
+  border-top-color: var(--accent-blue);
+  border-radius: 50%;
+  animation: stats-spin 0.8s linear infinite;
+}
+
+@keyframes stats-spin {
+  to { transform: rotate(360deg); }
+}
+
+.stats-error {
+  background: rgba(239, 68, 68, 0.1);
+  border: 1px solid rgba(239, 68, 68, 0.3);
+  color: #fca5a5;
+  padding: 0.75rem 1rem;
+  border-radius: 6px;
+  margin-bottom: 1.5rem;
+  font-size: 0.875rem;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.stats-empty {
+  text-align: center;
+  padding: 2rem 1rem;
+  color: var(--text-muted);
+  font-size: 0.875rem;
+}
+
+/* ── Quota Section ── */
+.quota-grid {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 1rem 2rem;
+  align-items: center;
+}
+
+@media (max-width: 600px) {
+  .quota-grid {
+    grid-template-columns: 1fr;
+    justify-items: center;
+  }
+}
+
+.quota-details {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.quota-detail-row {
+  display: flex;
+  justify-content: space-between;
+  font-size: 0.875rem;
+  padding: 0.3rem 0;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.quota-detail-row:last-child {
+  border-bottom: none;
+}
+
+.quota-label {
+  color: var(--text-muted);
+}
+
+.quota-value {
+  font-weight: 600;
+  color: var(--text-main);
+}
