@@ -1,5 +1,6 @@
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
+import axios from 'axios';
 import {
   BrowserRouter,
   Routes,
@@ -20,17 +21,15 @@ import reactLogo from './assets/react.svg';
 import viteLogo from './assets/vite.svg';
 import './App.css';
 
-const USERS_KEY = 'saga-demo-users';
 const SESSION_KEY = 'saga-demo-session';
 const WORKFLOWS_KEY = 'flowforge-workflows';
 
-function getUsers() {
-  try {
-    return JSON.parse(localStorage.getItem(USERS_KEY) || '[]');
-  } catch {
-    return [];
-  }
-}
+const API = axios.create({
+  baseURL: 'http://localhost:5000/api',
+  headers: {
+    'Content-Type': 'application/json',
+  },
+});
 
 function getSavedWorkflows() {
   try {
@@ -47,29 +46,33 @@ function RegisterPage() {
   const [password, setPassword] = useState('');
   const [message, setMessage] = useState('');
 
-  function handleRegister(event) {
+  async function handleRegister(event) {
     event.preventDefault();
+    setMessage('');
 
     const normalizedEmail = email.trim().toLowerCase();
-    const users = getUsers();
-
-    if (users.some((user) => user.email === normalizedEmail)) {
-      setMessage('An account with this email already exists.');
-      return;
-    }
-
-    users.push({
-      name: name.trim(),
-      email: normalizedEmail,
-      password,
-    });
 
     try {
-      localStorage.setItem(USERS_KEY, JSON.stringify(users));
-      setMessage('Registration successful! Redirecting to login...');
+      const response = await API.post('/auth/register', {
+        name: name.trim(),
+        email: normalizedEmail,
+        password,
+      });
+
+      const data = response.data;
+
+      if (data.success === false) {
+        setMessage(data.message || 'Registration failed.');
+        return;
+      }
+
+      setMessage(data.message || 'Registration successful! Redirecting to login...');
       setTimeout(() => navigate('/login'), 700);
-    } catch {
-      setMessage('Unable to register. Browser storage may be unavailable.');
+    } catch (error) {
+      setMessage(
+        error.response?.data?.message ||
+        'Registration failed. Please check the server connection and try again.'
+      );
     }
   }
 
@@ -132,29 +135,40 @@ function LoginPage() {
   const [password, setPassword] = useState('');
   const [message, setMessage] = useState('');
 
-  function handleLogin(event) {
+  async function handleLogin(event) {
     event.preventDefault();
+    setMessage('');
 
     const normalizedEmail = email.trim().toLowerCase();
-    const user = getUsers().find(
-      (item) =>
-        item.email === normalizedEmail &&
-        item.password === password
-    );
-
-    if (!user) {
-      setMessage('Invalid email or password. Register first if you do not have an account.');
-      return;
-    }
 
     try {
-      localStorage.setItem(
-        SESSION_KEY,
-        JSON.stringify({ name: user.name, email: user.email })
-      );
+      const response = await API.post('/auth/login', {
+        email: normalizedEmail,
+        password,
+      });
+
+      const data = response.data;
+
+      if (!data.success || !data.token || !data.user) {
+        setMessage(data.message || 'Invalid email or password.');
+        return;
+      }
+
+      const sessionData = {
+        name: data.user.name,
+        email: data.user.email,
+        token: data.token,
+        tenantId: data.user.tenantId,
+      };
+
+      localStorage.setItem(SESSION_KEY, JSON.stringify(sessionData));
+      window.dispatchEvent(new Event('auth-session-changed'));
       navigate('/dashboard');
-    } catch {
-      setMessage('Unable to log in. Browser storage may be unavailable.');
+    } catch (error) {
+      setMessage(
+        error.response?.data?.message ||
+        'Login failed. Please check your email and password.'
+      );
     }
   }
 
@@ -411,6 +425,22 @@ function App() {
       return null;
     }
   });
+
+  useEffect(() => {
+    function updateSession() {
+      try {
+        setSession(JSON.parse(localStorage.getItem(SESSION_KEY) || 'null'));
+      } catch {
+        setSession(null);
+      }
+    }
+
+    window.addEventListener('auth-session-changed', updateSession);
+
+    return () => {
+      window.removeEventListener('auth-session-changed', updateSession);
+    };
+  }, []);
 
   function logout() {
     localStorage.removeItem(SESSION_KEY);
