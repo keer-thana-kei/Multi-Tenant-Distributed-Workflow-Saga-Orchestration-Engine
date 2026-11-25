@@ -1,7 +1,7 @@
 require('dotenv').config()
 const mongoose = require('mongoose')
 const Tenant = require('../src/models/Tenant')
-const { generateApiKey } = require('../src/middleware/Tenant')
+const { generateApiKey } = require('../src/middleware/tenant')
 
 ;(async () => {
     await mongoose.connect(process.env.MONGODB_URI)
