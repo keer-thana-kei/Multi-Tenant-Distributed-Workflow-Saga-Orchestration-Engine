@@ -13,6 +13,7 @@ import {
 } from 'react-router-dom';
 
 import MonitoringDashboard from './components/MonitoringDashboard';
+import StatsDashboard from './components/StatsDashboard';
 import WorkflowEditor from './WorkflowEditor';
 import heroImg from './assets/hero.png';
 import reactLogo from './assets/react.svg';
@@ -379,6 +380,9 @@ function HomeView() {
         </p>
 
         <div className="home-actions">
+          <Link to="/stats" className="home-link">
+            Open Monitoring Analytics →
+          </Link>
           <Link to="/monitoring" className="home-link">
             Open Live Monitoring →
           </Link>
@@ -422,6 +426,7 @@ function App() {
           <div className="nav-links">
             <NavLink to="/">Workflow Console</NavLink>
             <NavLink to="/dashboard">Workflow Dashboard</NavLink>
+            <NavLink to="/stats">Monitoring Stats</NavLink>
             <NavLink to="/monitoring">Live Monitoring</NavLink>
 
             {session ? (
@@ -444,6 +449,7 @@ function App() {
             <Route path="/register" element={<RegisterPage />} />
             <Route path="/dashboard" element={<WorkflowDashboard />} />
             <Route path="/editor/:workflowId" element={<EditorRoute />} />
+            <Route path="/stats" element={<StatsDashboard />} />
             <Route path="/monitoring" element={<MonitoringDashboard />} />
             <Route path="/service-dashboard" element={<MonitoringDashboard />} />
             <Route path="*" element={<Navigate to="/" replace />} />
