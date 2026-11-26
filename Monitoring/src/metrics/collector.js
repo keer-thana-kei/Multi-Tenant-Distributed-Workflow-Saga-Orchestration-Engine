@@ -56,10 +56,16 @@ async function collectSystemMetrics() {
  * }
  */
 async function collectWorkflowMetrics(tenantId) {
+  if (tenantId !== undefined && tenantId !== null) {
+    if (typeof tenantId !== 'string' || !tenantId.trim()) {
+      throw new Error('companyId must be a non-empty string');
+    }
+  }
+
   const Workflow = getWorkflowModel();
 
   // Build initial match stage — scope to single tenant when specified
-  const matchStage = tenantId ? { $match: { companyId: tenantId } } : null;
+  const matchStage = tenantId ? { $match: { companyId: String(tenantId).trim() } } : null;
 
   // Aggregate per tenant
   const pipeline = [
@@ -141,9 +147,22 @@ async function collectMetrics() {
   };
 }
 
+/**
+ * Strict tenant-specific metrics query.
+ * Throws error if companyId is missing or empty.
+ * Never executes an unfiltered aggregation.
+ */
+async function collectTenantMetrics(companyId) {
+  if (!companyId || typeof companyId !== 'string' || !companyId.trim()) {
+    throw new Error('companyId is mandatory for tenant-specific metrics');
+  }
+  return collectWorkflowMetrics(companyId.trim());
+}
+
 module.exports = {
   collectMetrics,
   collectSystemMetrics,
   collectWorkflowMetrics,
+  collectTenantMetrics,
   getWorkflowModel,
 };

@@ -47,6 +47,27 @@ router.get('/', (req, res) => {
   if (!metrics || Object.keys(metrics).length === 0) {
     return res.status(503).json({ error: 'Metrics not yet collected. Retry in a few seconds.' });
   }
+
+  // Enforce strict tenant isolation for non-admin callers
+  if (req.auth && req.auth.method === 'jwt' && req.auth.payload?.role !== 'admin') {
+    const callerTenant = req.auth.payload?.companyId || req.auth.payload?.tenantId;
+    if (!callerTenant) {
+      return res.status(403).json({ error: 'Forbidden: No tenant associated with token' });
+    }
+    const tenantMetrics = (metrics.workflows?.tenants || []).find(
+      (t) => String(t.companyId) === String(callerTenant)
+    ) || { companyId: callerTenant, total: 0, pending: 0, running: 0, success: 0, failed: 0 };
+
+    return res.json({
+      collectedAt: metrics.collectedAt,
+      system: metrics.system,
+      workflows: {
+        tenants: [tenantMetrics],
+        global: tenantMetrics,
+      },
+    });
+  }
+
   return res.json(metrics);
 });
 
@@ -67,14 +88,18 @@ router.get('/:tenantId', (req, res) => {
   const { metrics } = req.app.locals.state;
   const tenantId = req.params.tenantId;
 
+  if (!tenantId || !tenantId.trim()) {
+    return res.status(400).json({ error: 'companyId/tenantId is required' });
+  }
+
   // Tenant isolation check (admin API-key callers bypass this)
   if (req.auth && req.auth.method === 'jwt') {
-    const requestedTenant = req.headers['x-tenant-id'];
-    if (!requestedTenant) {
-      return res.status(403).json({ error: 'Missing X-Tenant-ID header.' });
-    }
-    if (requestedTenant !== tenantId) {
-      return res.status(403).json({ error: 'X-Tenant-ID does not match requested tenant.' });
+    const callerTenant = req.auth.payload?.companyId || req.auth.payload?.tenantId;
+    const requestedTenant = req.headers['x-tenant-id'] || tenantId;
+    if (req.auth.payload?.role !== 'admin') {
+      if (!callerTenant || String(callerTenant) !== String(tenantId) || String(requestedTenant) !== String(tenantId)) {
+        return res.status(403).json({ error: 'Unauthorized: Cross-tenant access forbidden' });
+      }
     }
   }
 

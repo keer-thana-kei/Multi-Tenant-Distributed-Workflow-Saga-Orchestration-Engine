@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import './StatsDashboard.css';
 
 const DEFAULT_API_URL = import.meta.env.VITE_BACKEND_URL || 'http://localhost:5000';
-const DEFAULT_API_KEY = 'wf_3c5cf0ccd3088b2f4ab4b19bd57c153971d7eb63b6b92245';
+const DEFAULT_API_KEY = '';
 
 export default function StatsDashboard() {
   // Credentials & Configuration
@@ -538,7 +538,7 @@ export default function StatsDashboard() {
     const progress = Math.min(100, quotaUtilization);
     const strokeDashoffset = circumference - (progress / 100) * circumference;
 
-    const gaugeColor = progress > 85 ? '#ef4444' : progress > 60 ? '#f59e0b' : '#10b981';
+    const gaugeColor = progress >= 100 ? '#ef4444' : progress >= 80 ? '#f59e0b' : '#10b981';
 
     return (
       <div className="quota-grid">
@@ -598,6 +598,20 @@ export default function StatsDashboard() {
             <span className="quota-label">Lifetime Executions:</span>
             <span className="quota-value">{formatNum(totalExecutions)}</span>
           </div>
+
+          {quota.quotaStatus === 'exceeded' || progress >= 100 ? (
+            <div style={{ marginTop: '0.75rem', padding: '0.4rem 0.75rem', borderRadius: '6px', background: 'rgba(239, 68, 68, 0.15)', color: '#ef4444', fontWeight: 600, fontSize: '0.8rem', textAlign: 'center' }}>
+              🚨 100% Quota Exceeded Alert — Rate Limiting Active
+            </div>
+          ) : quota.quotaStatus === 'warning' || progress >= 80 ? (
+            <div style={{ marginTop: '0.75rem', padding: '0.4rem 0.75rem', borderRadius: '6px', background: 'rgba(245, 158, 11, 0.15)', color: '#f59e0b', fontWeight: 600, fontSize: '0.8rem', textAlign: 'center' }}>
+              ⚠️ 80% Quota Warning Threshold Reached
+            </div>
+          ) : (
+            <div style={{ marginTop: '0.75rem', padding: '0.4rem 0.75rem', borderRadius: '6px', background: 'rgba(16, 185, 129, 0.15)', color: '#10b981', fontWeight: 600, fontSize: '0.8rem', textAlign: 'center' }}>
+              ✅ Quota Normal (&lt;80%)
+            </div>
+          )}
         </div>
       </div>
     );
@@ -824,11 +838,11 @@ export default function StatsDashboard() {
 
           <div className="stats-card">
             <div className="stats-card-title">Quota Utilization</div>
-            <div className="stats-card-value" style={{ color: '#38bdf8' }}>
+            <div className="stats-card-value" style={{ color: quota && (quota.quotaUtilization >= 100 ? '#ef4444' : quota.quotaUtilization >= 80 ? '#f59e0b' : '#38bdf8') }}>
               {quota ? `${quota.quotaUtilization}%` : '--'}
             </div>
             <div className="stats-card-subtitle">
-              {quota ? `${quota.usedQuota} / ${quota.totalQuota} rpm` : 'Rate limit'}
+              {quota ? (quota.quotaUtilization >= 100 ? '🚨 100% Exceeded' : quota.quotaUtilization >= 80 ? '⚠️ 80% Warning' : `${quota.usedQuota} / ${quota.totalQuota} rpm`) : 'Rate limit'}
             </div>
           </div>
 
