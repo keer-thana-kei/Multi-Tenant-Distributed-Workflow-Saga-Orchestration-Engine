@@ -71,36 +71,76 @@ router.get('/executions', async (req, res, next) => {
             }
             filter.workflowId = req.query.workflowId
         }
-        if (req.query.status) filter.status = req.query.status
 
-        const limit = Math.min(Math.max(parseInt(req.query.limit) || 20, 1), 100)
-        const page = Math.max(parseInt(req.query.page) || 1, 1)
+        res.json(execution);
 
-        const [items, total] = await Promise.all([
-            Execution.find(filter)
-                .select('workflowId status startedAt finishedAt createdAt steps.nodeId steps.name steps.status')
-                .sort({ createdAt: -1 })
-                .skip((page - 1) * limit)
-                .limit(limit)
-                .lean(),
-            Execution.countDocuments(filter)
-        ])
+    } catch (err) {
+        next(err);
+    }
+});
 
-        res.json({ items, total, page, limit })
-    } catch (err) { next(err) }
-})
-
-// One execution (full detail)
-router.get('/executions/:execId', async (req, res, next) => {
+// UPDATE WORKFLOW
+router.put('/:id', async (req, res, next) => {
     try {
-        if (!isId(req.params.execId)) return res.status(404).json({ message: 'Execution not found' })
-        const ex = await Execution.findOne({ _id: req.params.execId, companyId: req.tenantId })
-        if (!ex) return res.status(404).json({ message: 'Execution not found' })
-        res.json(ex)
-    } catch (err) { next(err) }
-})
+        const { workflowName, nodes, edges } = req.body;
 
-// One workflow
+        if (!mongoose.Types.ObjectId.isValid(req.params.id)) {
+            return res.status(400).json({
+                message: 'Invalid workflow ID'
+            });
+        }
+
+        if (!workflowName) {
+            return res.status(400).json({
+                message: 'workflowName is required'
+            });
+        }
+
+        if (!Array.isArray(nodes) || nodes.length === 0) {
+            return res.status(400).json({
+                message: 'Workflow must contain executable nodes'
+            });
+        }
+
+        const result = validateGraph(nodes, edges || []);
+
+        if (!result.valid) {
+            return res.status(400).json({
+                message: 'Invalid graph',
+                errors: result.errors
+            });
+        }
+
+        const workflow = await Workflow.findOneAndUpdate(
+            {
+                _id: req.params.id,
+                companyId: req.tenantId
+            },
+            {
+                workflowName,
+                nodes,
+                edges: edges || []
+            },
+            {
+                new: true,
+                runValidators: true
+            }
+        );
+
+        if (!workflow) {
+            return res.status(404).json({
+                message: 'Workflow not found'
+            });
+        }
+
+        res.json(workflow);
+
+    } catch (err) {
+        next(err);
+    }
+});
+
+// GET SINGLE WORKFLOW
 router.get('/:id', async (req, res, next) => {
     try {
         if (!isId(req.params.id)) return res.status(404).json({ message: 'Workflow not found' })

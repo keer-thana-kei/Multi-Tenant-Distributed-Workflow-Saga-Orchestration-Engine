@@ -1,45 +1,50 @@
 
-import React, { useState } from 'react';
-import {
-  BrowserRouter,
-  Routes,
-  Route,
-  NavLink,
-  Navigate,
-  Link,
-  useNavigate,
-  useParams,
-  useLocation,
-} from 'react-router-dom';
+import React, { useState, useEffect } from 'react';
+import { BrowserRouter, Routes, Route, Navigate, Link, useNavigate, useParams, useLocation } from 'react-router-dom';
+import axios from 'axios';
 
+import { createWorkflow, getWorkflows } from './api';
 import MonitoringDashboard from './components/MonitoringDashboard';
 import StatsDashboard from './components/StatsDashboard';
 import WorkflowEditor from './WorkflowEditor';
-import heroImg from './assets/hero.png';
-import reactLogo from './assets/react.svg';
-import viteLogo from './assets/vite.svg';
+
 import './App.css';
 
-const USERS_KEY = 'saga-demo-users';
 const SESSION_KEY = 'saga-demo-session';
-const WORKFLOWS_KEY = 'flowforge-workflows';
 
-function getUsers() {
+const API = axios.create({
+  baseURL: 'http://localhost:5000/api',
+  headers: {
+    'Content-Type': 'application/json',
+  },
+});
+
+// Check whether the user is logged in.
+function getSession() {
   try {
-    return JSON.parse(localStorage.getItem(USERS_KEY) || '[]');
+    return JSON.parse(localStorage.getItem(SESSION_KEY) || 'null');
   } catch {
-    return [];
+    return null;
   }
 }
 
-function getSavedWorkflows() {
-  try {
-    return JSON.parse(localStorage.getItem(WORKFLOWS_KEY) || '{}');
-  } catch {
-    return {};
-  }
+// Protect pages that require login.
+function ProtectedRoute({ children }) {
+  const [session, setSession] = useState(getSession);
+
+  useEffect(() => {
+    const updateSession = () => setSession(getSession());
+
+    window.addEventListener('auth-session-changed', updateSession);
+    return () => {
+      window.removeEventListener('auth-session-changed', updateSession);
+    };
+  }, []);
+
+  return session?.token ? children : <Navigate to="/login" replace />;
 }
 
+// Registration page.
 function RegisterPage() {
   const navigate = useNavigate();
   const [name, setName] = useState('');
@@ -47,29 +52,31 @@ function RegisterPage() {
   const [password, setPassword] = useState('');
   const [message, setMessage] = useState('');
 
-  function handleRegister(event) {
+  async function handleRegister(event) {
     event.preventDefault();
-
-    const normalizedEmail = email.trim().toLowerCase();
-    const users = getUsers();
-
-    if (users.some((user) => user.email === normalizedEmail)) {
-      setMessage('An account with this email already exists.');
-      return;
-    }
-
-    users.push({
-      name: name.trim(),
-      email: normalizedEmail,
-      password,
-    });
+    setMessage('');
 
     try {
-      localStorage.setItem(USERS_KEY, JSON.stringify(users));
-      setMessage('Registration successful! Redirecting to login...');
+      const response = await API.post('/auth/register', {
+        name: name.trim(),
+        email: email.trim().toLowerCase(),
+        password,
+      });
+
+      const data = response.data;
+
+      if (data.success === false) {
+        setMessage(data.message || 'Registration failed.');
+        return;
+      }
+
+      setMessage(data.message || 'Registration successful!');
       setTimeout(() => navigate('/login'), 700);
-    } catch {
-      setMessage('Unable to register. Browser storage may be unavailable.');
+    } catch (error) {
+      setMessage(
+        error.response?.data?.message ||
+        'Registration failed. Check the backend connection.'
+      );
     }
   }
 
@@ -126,35 +133,45 @@ function RegisterPage() {
   );
 }
 
+// Login page.
 function LoginPage() {
   const navigate = useNavigate();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [message, setMessage] = useState('');
 
-  function handleLogin(event) {
+  async function handleLogin(event) {
     event.preventDefault();
-
-    const normalizedEmail = email.trim().toLowerCase();
-    const user = getUsers().find(
-      (item) =>
-        item.email === normalizedEmail &&
-        item.password === password
-    );
-
-    if (!user) {
-      setMessage('Invalid email or password. Register first if you do not have an account.');
-      return;
-    }
+    setMessage('');
 
     try {
-      localStorage.setItem(
-        SESSION_KEY,
-        JSON.stringify({ name: user.name, email: user.email })
-      );
+      const response = await API.post('/auth/login', {
+        email: email.trim().toLowerCase(),
+        password,
+      });
+
+      const data = response.data;
+
+      if (!data.success || !data.token || !data.user) {
+        setMessage(data.message || 'Invalid email or password.');
+        return;
+      }
+
+      const sessionData = {
+        name: data.user.name,
+        email: data.user.email,
+        token: data.token,
+        tenantId: data.user.tenantId,
+      };
+
+      localStorage.setItem(SESSION_KEY, JSON.stringify(sessionData));
+      window.dispatchEvent(new Event('auth-session-changed'));
       navigate('/dashboard');
-    } catch {
-      setMessage('Unable to log in. Browser storage may be unavailable.');
+    } catch (error) {
+      setMessage(
+        error.response?.data?.message ||
+        'Login failed. Check your email and password.'
+      );
     }
   }
 
@@ -200,27 +217,99 @@ function LoginPage() {
   );
 }
 
+// Workflow dashboard: create and fetch workflows from backend.
 function WorkflowDashboard() {
   const navigate = useNavigate();
-  const [workflows, setWorkflows] = useState(getSavedWorkflows());
-  const [workflowName, setWorkflowName] = useState('');
 
-  function createWorkflow(event) {
+  const [workflows, setWorkflows] = useState([]);
+  const [workflowName, setWorkflowName] = useState('');
+  const [loading, setLoading] = useState(true);
+  const [creating, setCreating] = useState(false);
+  const [error, setError] = useState('');
+
+  async function refreshWorkflows() {
+    setLoading(true);
+    setError('');
+
+    try {
+      const data = await getWorkflows();
+      setWorkflows(Array.isArray(data) ? data : []);
+    } catch (err) {
+      console.error('Failed to fetch workflows:', err);
+      setError(
+        err.response?.data?.message ||
+        'Unable to load workflows. Check that the backend is running.'
+      );
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  useEffect(() => {
+    refreshWorkflows();
+  }, []);
+
+  async function handleCreateWorkflow(event) {
     event.preventDefault();
 
-    const id = `workflow-${Date.now()}`;
     const name = workflowName.trim() || 'My Workflow';
 
-    navigate(`/editor/${encodeURIComponent(id)}`, {
-      state: { workflowName: name },
+    setCreating(true);
+    setError('');
+
+    try {
+      const workflow = await createWorkflow({
+        workflowName: name,
+        nodes: [
+          {
+            id: 'task-1',
+            name: 'Sample HTTP Task',
+            type: 'http',
+            url: 'https://example.com/api',
+            method: 'GET',
+          },
+        ],
+        edges: [],
+      });
+
+      if (!workflow?._id) {
+        throw new Error('Backend did not return a workflow ID.');
+      }
+
+      setWorkflowName('');
+      await refreshWorkflows();
+
+      navigate(`/editor/${encodeURIComponent(workflow._id)}`, {
+        state: { workflowName: name },
+      });
+    } catch (err) {
+      console.error('Workflow creation failed:', err);
+      setError(
+        err.response?.data?.message ||
+        err.message ||
+        'Unable to create workflow.'
+      );
+    } finally {
+      setCreating(false);
+    }
+  }
+
+  function openWorkflow(workflow) {
+    if (!workflow?._id) {
+      setError('Invalid workflow ID.');
+      return;
+    }
+
+    navigate(`/editor/${encodeURIComponent(workflow._id)}`, {
+      state: { workflowName: workflow.workflowName },
     });
   }
 
-  function refreshWorkflows() {
-    setWorkflows(getSavedWorkflows());
+  function handleLogout() {
+    localStorage.removeItem(SESSION_KEY);
+    window.dispatchEvent(new Event('auth-session-changed'));
+    navigate('/login');
   }
-
-  const entries = Object.entries(workflows);
 
   return (
     <section className="dashboard-page">
@@ -235,16 +324,13 @@ function WorkflowDashboard() {
         <button
           type="button"
           className="secondary-button"
-          onClick={() => {
-            localStorage.removeItem(SESSION_KEY);
-            navigate('/login');
-          }}
+          onClick={handleLogout}
         >
           Log Out
         </button>
       </header>
 
-      <form className="create-workflow-card" onSubmit={createWorkflow}>
+      <form className="create-workflow-card" onSubmit={handleCreateWorkflow}>
         <h2>Create a Workflow</h2>
 
         <label htmlFor="workflow-name">Workflow name</label>
@@ -255,58 +341,53 @@ function WorkflowDashboard() {
           placeholder="Example: Order Processing"
         />
 
-        <button type="submit" className="primary-button">
-          + Create Workflow
+        <button
+          type="submit"
+          className="primary-button"
+          disabled={creating}
+        >
+          {creating ? 'Creating...' : '+ Create Workflow'}
         </button>
       </form>
 
       <div className="saved-heading">
         <h2>Saved Workflows</h2>
+
         <button
           type="button"
           className="refresh-button"
           onClick={refreshWorkflows}
+          disabled={loading}
         >
-          Refresh list
+          {loading ? 'Loading...' : 'Refresh list'}
         </button>
       </div>
 
-      {entries.length === 0 ? (
+      {error && <p className="form-error" role="alert">{error}</p>}
+
+      {loading ? (
+        <div className="empty-state">
+          <p>Loading workflows...</p>
+        </div>
+      ) : workflows.length === 0 ? (
         <div className="empty-state">
           <h3>No saved workflows yet</h3>
-          <p>Create a workflow, add nodes, and save it in the editor.</p>
+          <p>Create a workflow to get started.</p>
         </div>
       ) : (
         <div className="workflow-cards">
-          {entries.map(([id, workflow], index) => (
-            <article className="saved-workflow-card" key={id}>
-              <h3>
-                {workflow.workflowName ||
-                  (/^workflow-\d+$/.test(id)
-                    ? `Workflow ${index + 1}`
-                    : `Workflow ${id}`)}
-              </h3>
-
+          {workflows.map((workflow) => (
+            <article className="saved-workflow-card" key={workflow._id}>
+              <h3>{workflow.workflowName}</h3>
               <p>
                 Nodes: {workflow.nodes?.length || 0}
                 {' · '}
                 Connections: {workflow.edges?.length || 0}
               </p>
-
               <button
                 type="button"
                 className="primary-button"
-                onClick={() =>
-                  navigate(`/editor/${encodeURIComponent(id)}`, {
-                    state: {
-                      workflowName:
-                        workflow.workflowName ||
-                        (/^workflow-\d+$/.test(id)
-                          ? `Workflow ${index + 1}`
-                          : `Workflow ${id}`),
-                    },
-                  })
-                }
+                onClick={() => openWorkflow(workflow)}
               >
                 Open Workflow
               </button>
@@ -322,140 +403,76 @@ function WorkflowDashboard() {
   );
 }
 
-function EditorRoute() {
-  const { workflowId } = useParams();
+// Loads the selected workflow route into the editor.
+function WorkflowEditorPage() {
+  const { id } = useParams();
   const location = useLocation();
-  const id = decodeURIComponent(workflowId || 'default-workflow');
-  const saved = getSavedWorkflows()[id];
-
-  const workflowName =
-    location.state?.workflowName ||
-    saved?.workflowName ||
-    id;
+  const navigate = useNavigate();
 
   return (
     <WorkflowEditor
-      key={id}
       workflowId={id}
-      workflowName={workflowName}
-      onBack={() => {
-        window.history.back();
-      }}
+      workflowName={location.state?.workflowName || 'Workflow'}
+      onBack={() => navigate('/dashboard')}
     />
   );
 }
 
-function HomeView() {
-  const [count, setCount] = useState(0);
-
-  return (
-    <div className="home-view">
-      <section className="home-hero">
-        <div className="hero">
-          <img src={heroImg} className="base" width="170" height="179" alt="" />
-          <img src={reactLogo} className="framework" alt="React logo" />
-          <img src={viteLogo} className="vite" alt="Vite logo" />
-        </div>
-
-        <h1>Multi-Tenant Saga Orchestrator</h1>
-        <p className="muted-text">
-          Distributed transaction coordinator with real-time telemetry,
-          Prometheus exposition, and WebSocket streaming.
-        </p>
-
-        <button
-          type="button"
-          className="counter"
-          onClick={() => setCount((current) => current + 1)}
-        >
-          Workflow triggers executed: {count}
-        </button>
-      </section>
-
-      <section className="overview-card">
-        <h2>Observability &amp; Engine Overview</h2>
-        <p>
-          This application integrates real-time saga telemetry, multi-tenant
-          isolation, Prometheus exposition, and a live operational dashboard.
-        </p>
-
-        <div className="home-actions">
-          <Link to="/stats" className="home-link">
-            Open Monitoring Analytics →
-          </Link>
-          <Link to="/monitoring" className="home-link">
-            Open Live Monitoring →
-          </Link>
-          <Link to="/dashboard" className="home-link">
-            Open Workflow Dashboard →
-          </Link>
-          <a
-            href="http://localhost:4000/dashboard"
-            target="_blank"
-            rel="noopener noreferrer"
-            className="home-link secondary-link"
-          >
-            Standalone Service Dashboard ↗
-          </a>
-        </div>
-      </section>
-    </div>
-  );
-}
-
+// Main application and routes.
 function App() {
-  const [session, setSession] = useState(() => {
-    try {
-      return JSON.parse(localStorage.getItem(SESSION_KEY) || 'null');
-    } catch {
-      return null;
-    }
-  });
-
-  function logout() {
-    localStorage.removeItem(SESSION_KEY);
-    setSession(null);
-  }
-
   return (
     <BrowserRouter>
-      <div className="app-shell">
-        <nav className="app-nav">
-          <Link to="/" className="app-brand">Saga Orchestrator</Link>
+      <Routes>
+        <Route
+          path="/"
+          element={
+            getSession()
+              ? <Navigate to="/dashboard" replace />
+              : <Navigate to="/login" replace />
+          }
+        />
 
-          <div className="nav-links">
-            <NavLink to="/">Workflow Console</NavLink>
-            <NavLink to="/dashboard">Workflow Dashboard</NavLink>
-            <NavLink to="/stats">Monitoring Stats</NavLink>
-            <NavLink to="/monitoring">Live Monitoring</NavLink>
+        <Route path="/login" element={<LoginPage />} />
+        <Route path="/register" element={<RegisterPage />} />
 
-            {session ? (
-              <button type="button" className="nav-logout" onClick={logout}>
-                Log Out
-              </button>
-            ) : (
-              <>
-                <NavLink to="/login">Login</NavLink>
-                <NavLink to="/register">Register</NavLink>
-              </>
-            )}
-          </div>
-        </nav>
+        <Route
+          path="/dashboard"
+          element={
+            <ProtectedRoute>
+              <WorkflowDashboard />
+            </ProtectedRoute>
+          }
+        />
 
-        <main className="app-main">
-          <Routes>
-            <Route path="/" element={<HomeView />} />
-            <Route path="/login" element={<LoginPage />} />
-            <Route path="/register" element={<RegisterPage />} />
-            <Route path="/dashboard" element={<WorkflowDashboard />} />
-            <Route path="/editor/:workflowId" element={<EditorRoute />} />
-            <Route path="/stats" element={<StatsDashboard />} />
-            <Route path="/monitoring" element={<MonitoringDashboard />} />
-            <Route path="/service-dashboard" element={<MonitoringDashboard />} />
-            <Route path="*" element={<Navigate to="/" replace />} />
-          </Routes>
-        </main>
-      </div>
+        <Route
+          path="/editor/:id"
+          element={
+            <ProtectedRoute>
+              <WorkflowEditorPage />
+            </ProtectedRoute>
+          }
+        />
+
+        <Route
+          path="/monitoring"
+          element={
+            <ProtectedRoute>
+              <MonitoringDashboard />
+            </ProtectedRoute>
+          }
+        />
+
+        <Route
+          path="/stats"
+          element={
+            <ProtectedRoute>
+              <StatsDashboard />
+            </ProtectedRoute>
+          }
+        />
+
+        <Route path="*" element={<Navigate to="/" replace />} />
+      </Routes>
     </BrowserRouter>
   );
 }
