@@ -119,6 +119,67 @@ router.get('/executions/:execId', async (req, res, next) => {
     }
 });
 
+// UPDATE WORKFLOW
+router.put('/:id', async (req, res, next) => {
+    try {
+        const { workflowName, nodes, edges } = req.body;
+
+        if (!mongoose.Types.ObjectId.isValid(req.params.id)) {
+            return res.status(400).json({
+                message: 'Invalid workflow ID'
+            });
+        }
+
+        if (!workflowName) {
+            return res.status(400).json({
+                message: 'workflowName is required'
+            });
+        }
+
+        if (!Array.isArray(nodes) || nodes.length === 0) {
+            return res.status(400).json({
+                message: 'Workflow must contain executable nodes'
+            });
+        }
+
+        const result = validateGraph(nodes, edges || []);
+
+        if (!result.valid) {
+            return res.status(400).json({
+                message: 'Invalid graph',
+                errors: result.errors
+            });
+        }
+
+        const workflow = await Workflow.findOneAndUpdate(
+            {
+                _id: req.params.id,
+                companyId: req.tenantId
+            },
+            {
+                workflowName,
+                nodes,
+                edges: edges || []
+            },
+            {
+                new: true,
+                runValidators: true
+            }
+        );
+
+        if (!workflow) {
+            return res.status(404).json({
+                message: 'Workflow not found'
+            });
+        }
+
+        res.json(workflow);
+
+    } catch (err) {
+        next(err);
+    }
+});
+
 // GET SINGLE WORKFLOW
 router.get('/:id', async (req, res, next) => {
     try {
