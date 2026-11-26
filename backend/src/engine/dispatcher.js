@@ -16,7 +16,7 @@ const runOne = async (id) => {
         console.error('Engine crashed:', err)
     } finally {
         running--
-    }
+    } 
 }
 
 // Atomically take ownership of one specific pending run
