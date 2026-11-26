@@ -1,4 +1,3 @@
-
 const express = require("express");
 const bcrypt = require("bcrypt");
 const jwt = require("jsonwebtoken");
@@ -12,24 +11,14 @@ const router = express.Router();
 // VALIDATION HELPERS
 // ===============================
 
-// Validate email format
-const isValidEmail = (email) => {
-    return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
-};
+const isValidEmail = (email) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
 
-// Validate password
-const isValidPassword = (password) => {
-    return (
-        typeof password === "string" &&
-        password.length >= 8 &&
-        Buffer.byteLength(password, "utf8") <= 72
-    );
-};
+const isValidPassword = (password) =>
+    typeof password === "string" &&
+    password.length >= 8 &&
+    Buffer.byteLength(password, "utf8") <= 72;
 
-// Escape special characters for regular expression
-const escapeRegex = (value) => {
-    return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-};
+const escapeRegex = (value) => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
 // ===============================
 // DEFAULT TENANT
@@ -51,9 +40,7 @@ async function getDefaultTenant() {
     });
 
     if (!tenant) {
-        throw new Error(
-            `Active tenant '${tenantName}' not found`
-        );
+        throw new Error(`Active tenant '${tenantName}' not found`);
     }
 
     return tenant;
@@ -77,9 +64,7 @@ const generateToken = (user) => {
             tenantId: user.tenantId.toString()
         },
         secret,
-        {
-            expiresIn: "1h"
-        }
+        { expiresIn: "1h" }
     );
 };
 
@@ -91,7 +76,6 @@ router.post("/register", async (req, res) => {
     try {
         const { name, email, password } = req.body || {};
 
-        // Check required fields
         if (!name || !email || !password) {
             return res.status(400).json({
                 success: false,
@@ -99,7 +83,6 @@ router.post("/register", async (req, res) => {
             });
         }
 
-        // Validate name
         if (
             typeof name !== "string" ||
             name.trim().length < 2 ||
@@ -111,18 +94,13 @@ router.post("/register", async (req, res) => {
             });
         }
 
-        // Validate email
-        if (
-            typeof email !== "string" ||
-            !isValidEmail(email.trim())
-        ) {
+        if (typeof email !== "string" || !isValidEmail(email.trim())) {
             return res.status(400).json({
                 success: false,
                 message: "Please enter a valid email address"
             });
         }
 
-        // Validate password
         if (!isValidPassword(password)) {
             return res.status(400).json({
                 success: false,
@@ -133,11 +111,7 @@ router.post("/register", async (req, res) => {
 
         const normalizedEmail = email.trim().toLowerCase();
 
-        // Check existing user
-        const existingUser = await User.findOne({
-            email: normalizedEmail
-        });
-
+        const existingUser = await User.findOne({ email: normalizedEmail });
         if (existingUser) {
             return res.status(409).json({
                 success: false,
@@ -145,13 +119,9 @@ router.post("/register", async (req, res) => {
             });
         }
 
-        // Find configured active tenant
         const tenant = await getDefaultTenant();
-
-        // Hash password
         const hashedPassword = await bcrypt.hash(password, 12);
 
-        // Create user
         const user = await User.create({
             name: name.trim(),
             email: normalizedEmail,
@@ -159,7 +129,6 @@ router.post("/register", async (req, res) => {
             tenantId: tenant._id
         });
 
-        // Generate JWT
         const token = generateToken(user);
 
         return res.status(201).json({
@@ -173,35 +142,34 @@ router.post("/register", async (req, res) => {
                 tenantId: user.tenantId
             }
         });
-
     } catch (error) {
-       console.error("Registration error:", error.message);
+        console.error("Registration error:", error.message);
 
-      if (error.code === 11000) {
-          return res.status(409).json({
-              success: false,
-             message: "An account with this email already exists"
-         });
-     }
+        if (error.code === 11000) {
+            return res.status(409).json({
+                success: false,
+                message: "An account with this email already exists"
+            });
+        }
 
-      if (error.name === "ValidationError") {
-          return res.status(400).json({
+        if (error.name === "ValidationError") {
+            return res.status(400).json({
+                success: false,
+                message: error.message
+            });
+        }
+
+        if (error.name === "MongoServerError") {
+            return res.status(500).json({
+                success: false,
+                message: "Database operation failed"
+            });
+        }
+
+        return res.status(500).json({
             success: false,
-            message: error.message
-         });
-      }
-
-      if (error.name === "MongoServerError") {
-          return res.status(500).json({
-            success: false,
-            message: "Database operation failed"
-          });
-      }
-
-      return res.status(500).json({
-          success: false,
-         message: "Registration failed"
-      });
+            message: "Registration failed"
+        });
     }
 });
 
@@ -213,7 +181,6 @@ router.post("/login", async (req, res) => {
     try {
         const { email, password } = req.body || {};
 
-        // Check required fields
         if (
             typeof email !== "string" ||
             typeof password !== "string" ||
@@ -226,7 +193,6 @@ router.post("/login", async (req, res) => {
             });
         }
 
-        // Validate email
         if (!isValidEmail(email.trim())) {
             return res.status(400).json({
                 success: false,
@@ -234,7 +200,6 @@ router.post("/login", async (req, res) => {
             });
         }
 
-        // Validate password length
         if (Buffer.byteLength(password, "utf8") > 72) {
             return res.status(401).json({
                 success: false,
@@ -244,11 +209,7 @@ router.post("/login", async (req, res) => {
 
         const normalizedEmail = email.trim().toLowerCase();
 
-        // Retrieve password explicitly
-        const user = await User.findOne({
-            email: normalizedEmail
-        }).select("+password");
-
+        const user = await User.findOne({ email: normalizedEmail }).select("+password");
         if (!user) {
             return res.status(401).json({
                 success: false,
@@ -256,12 +217,7 @@ router.post("/login", async (req, res) => {
             });
         }
 
-        // Compare password
-        const passwordMatch = await bcrypt.compare(
-            password,
-            user.password
-        );
-
+        const passwordMatch = await bcrypt.compare(password, user.password);
         if (!passwordMatch) {
             return res.status(401).json({
                 success: false,
@@ -269,12 +225,7 @@ router.post("/login", async (req, res) => {
             });
         }
 
-        // Check whether user's tenant is active
-        const tenant = await Tenant.findOne({
-            _id: user.tenantId,
-            active: true
-        });
-
+        const tenant = await Tenant.findOne({ _id: user.tenantId, active: true });
         if (!tenant) {
             return res.status(403).json({
                 success: false,
@@ -282,7 +233,6 @@ router.post("/login", async (req, res) => {
             });
         }
 
-        // Generate JWT
         const token = generateToken(user);
 
         return res.status(200).json({
@@ -296,7 +246,6 @@ router.post("/login", async (req, res) => {
                 tenantId: user.tenantId
             }
         });
-
     } catch (error) {
         console.error("Login error:", error.message);
 
@@ -306,9 +255,5 @@ router.post("/login", async (req, res) => {
         });
     }
 });
-
-// ===============================
-// EXPORT ROUTER
-// ===============================
 
 module.exports = router;
