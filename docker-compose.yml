@@ -6,7 +6,54 @@ networks:
     driver: bridge
 
 services:
-  # ── Existing Backend ────────────────────────────────────────────────────
+  # ── Redis (Shared message broker) ─────────────────────────────────────
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    networks:
+      - workflow-net
+
+  # ── API Server ────────────────────────────────────────────────────────
+  api:
+    build: ./backend
+    env_file: ./backend/.env
+    environment:
+      ROLE: api
+      PORT: "5000"
+      REDIS_URL: redis://redis:6379
+      ENABLE_MOCK: "true"
+    ports:
+      - "5000:5000"
+    depends_on:
+      - redis
+    restart: unless-stopped
+    networks:
+      - workflow-net
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://localhost:5000/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+
+  # ── Background Worker ─────────────────────────────────────────────────
+  worker:
+    build: ./backend
+    env_file: ./backend/.env
+    environment:
+      ROLE: worker
+      PORT: "5000"
+      REDIS_URL: redis://redis:6379
+      RECOVER_ON_START: "false"
+      WORKER_CONCURRENCY: "50"
+      ENABLE_MOCK: "true"
+    depends_on:
+      - redis
+    restart: unless-stopped
+    networks:
+      - workflow-net
+
+  # ── Legacy Backend (single-process mode) ──────────────────────────────
   backend:
     build:
       context: ./backend
@@ -15,7 +62,7 @@ services:
     container_name: workflow-backend
     restart: unless-stopped
     ports:
-      - "5000:5000"
+      - "5001:5000"
     env_file:
       - ./backend/.env
     networks:
@@ -26,6 +73,8 @@ services:
       timeout: 5s
       retries: 3
       start_period: 20s
+    profiles:
+      - legacy
 
   # ── Monitoring Service ───────────────────────────────────────────────────
   monitoring:
@@ -39,16 +88,17 @@ services:
       - "4000:4000"
     environment:
       PORT: "4000"
-      BACKEND_URL: "http://backend:5000"
+      BACKEND_URL: "http://api:5000"
       HEALTH_CHECK_INTERVAL: "30"
       CPU_ALERT_THRESHOLD: "80"
       MEMORY_ALERT_THRESHOLD: "85"
       FAILURE_RATE_THRESHOLD: "30"
       WORKER_STALL_MINUTES: "10"
     env_file:
-      - ./backend/.env     # shares MONGODB_URI
+      - ./Monitoring/.env   # uses MONITORING_MONGODB_URI (read-only) or falls back to MONGODB_URI
+      - ./backend/.env      # shares MONGODB_URI as fallback
     depends_on:
-      backend:
+      api:
         condition: service_healthy
     networks:
       - workflow-net
@@ -89,8 +139,8 @@ services:
     ports:
       - "3000:3000"
     environment:
-      - GF_SECURITY_ADMIN_USER=admin
-      - GF_SECURITY_ADMIN_PASSWORD=admin
+      - GF_SECURITY_ADMIN_USER=${GF_ADMIN_USER:?Set GF_ADMIN_USER in your .env}
+      - GF_SECURITY_ADMIN_PASSWORD=${GF_ADMIN_PASSWORD:?Set GF_ADMIN_PASSWORD in your .env}
       - GF_USERS_ALLOW_SIGN_UP=false
     volumes:
       - ./Monitoring/grafana/provisioning:/etc/grafana/provisioning:ro

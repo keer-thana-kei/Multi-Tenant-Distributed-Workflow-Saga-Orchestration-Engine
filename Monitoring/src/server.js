@@ -24,8 +24,18 @@ const alertsRoutes = require('./routes/alerts');
 const statusRoutes = require('./routes/status');
 
 const PORT = parseInt(process.env.PORT || '4000', 10);
-const MONGODB_URI = process.env.MONGODB_URI;
+const IS_PRODUCTION = process.env.NODE_ENV === 'production';
+// In production, strictly use MONITORING_MONGODB_URI (no fallback to read-write backend URI)
+const MONGODB_URI = IS_PRODUCTION
+  ? process.env.MONITORING_MONGODB_URI
+  : (process.env.MONITORING_MONGODB_URI || process.env.MONGODB_URI);
 const HEALTH_CHECK_INTERVAL = parseInt(process.env.HEALTH_CHECK_INTERVAL || '30', 10);
+
+// In production, strictly require the dedicated read-only monitoring URI
+if (IS_PRODUCTION && !process.env.MONITORING_MONGODB_URI) {
+  logger.error('CRITICAL: In production, MONITORING_MONGODB_URI is strictly required with a read-only MongoDB user. Fallback to MONGODB_URI is disabled for security.');
+  process.exit(1);
+}
 
 // Startup security warning if no auth secrets configured
 if (!process.env.JWT_SECRET && !process.env.MONITORING_API_KEY) {
@@ -141,12 +151,12 @@ async function runMonitoringCycle() {
 // ── Start ──────────────────────────────────────────────────────────────────
 async function start() {
   if (!MONGODB_URI) {
-    logger.error('MONGODB_URI is not set in .env');
+    logger.error('Connection failure: Missing monitoring database credentials. Set MONITORING_MONGODB_URI.');
     process.exit(1);
   }
 
   try {
-    await mongoose.connect(MONGODB_URI);
+    await mongoose.connect(MONGODB_URI, { readPreference: 'secondaryPreferred' });
     logger.info('MongoDB connected');
   } catch (err) {
     logger.error('MongoDB connection failed', { error: err.message });

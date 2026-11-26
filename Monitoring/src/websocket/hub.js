@@ -106,7 +106,25 @@ function deliverToTenant(targetTenantId, event) {
       (meta.role === 'admin' && meta.tenantId === null) ||    // Admin JWT seeing all
       (meta.tenantId && meta.tenantId === normTarget)        // Exact tenant match
     ) {
-      sendToClient(ws, event);
+      // Prevent cross-tenant data leakage: if event contains workflows and client is tenant-scoped, filter workflows
+      if (event.type === TYPES.METRICS_UPDATE && meta.tenantId && event.payload?.workflows) {
+        const tenantWorkflows = (event.payload.workflows.tenants || []).find(
+          (t) => String(t.companyId) === String(meta.tenantId)
+        ) || { companyId: meta.tenantId, total: 0, pending: 0, running: 0, success: 0, failed: 0 };
+        const scopedEvent = {
+          ...event,
+          payload: {
+            ...event.payload,
+            workflows: {
+              tenants: [tenantWorkflows],
+              global: tenantWorkflows,
+            },
+          },
+        };
+        sendToClient(ws, scopedEvent);
+      } else {
+        sendToClient(ws, event);
+      }
     }
   }
 }

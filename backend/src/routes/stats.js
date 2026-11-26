@@ -1,6 +1,7 @@
 const router = require('express').Router()
 const mongoose = require('mongoose')
 const Execution = require('../models/Execution')
+const DeadLetter = require('../models/DeadLetter')
 const { tenantAuth } = require('../middleware/tenant')
 
 router.use(tenantAuth)
@@ -28,29 +29,40 @@ function parseDateRange(query) {
 }
 
 function validateCompanyId(req, res) {
-    const { companyId } = req.query
-    if (!companyId) return true // no companyId filter requested
-
-    if (!mongoose.Types.ObjectId.isValid(companyId)) {
-        res.status(400).json({
+    if (!req.tenantId || !mongoose.Types.ObjectId.isValid(req.tenantId)) {
+        res.status(401).json({
             success: false,
-            message: 'Invalid company ID format'
+            message: 'Unauthorized: missing or invalid tenant identification'
         })
         return false
     }
 
-    if (String(companyId) !== String(req.tenantId)) {
-        res.status(403).json({
-            success: false,
-            message: 'Unauthorized: companyId does not belong to authenticated tenant'
-        })
-        return false
+    const { companyId } = req.query
+    if (companyId) {
+        if (!mongoose.Types.ObjectId.isValid(companyId)) {
+            res.status(400).json({
+                success: false,
+                message: 'Invalid company ID format'
+            })
+            return false
+        }
+
+        if (String(companyId) !== String(req.tenantId)) {
+            res.status(403).json({
+                success: false,
+                message: 'Unauthorized: companyId does not belong to authenticated tenant'
+            })
+            return false
+        }
     }
 
     return true
 }
 
 function buildBaseMatch(req, dateRange) {
+    if (!req.tenantId || !mongoose.Types.ObjectId.isValid(req.tenantId)) {
+        throw new Error('Tenant identification missing or invalid')
+    }
     const tenantObjId = new mongoose.Types.ObjectId(req.tenantId)
     const match = { companyId: tenantObjId }
 
@@ -447,6 +459,16 @@ router.get('/quota', async (req, res, next) => {
 
         const remainingQuota = Math.max(0, maxRunsPerMinute - currentRunsThisMinute)
 
+        // Quota threshold alerts
+        const WARNING_THRESHOLD = 80
+        const EXCEEDED_THRESHOLD = 100
+        let quotaStatus = 'normal'
+        if (quotaUtilization >= EXCEEDED_THRESHOLD) {
+            quotaStatus = 'exceeded'
+        } else if (quotaUtilization >= WARNING_THRESHOLD) {
+            quotaStatus = 'warning'
+        }
+
         res.json({
             success: true,
             data: {
@@ -457,7 +479,79 @@ router.get('/quota', async (req, res, next) => {
                 totalQuota: maxRunsPerMinute,
                 remainingQuota,
                 quotaUtilization,
+                quotaStatus,
+                isWarning: quotaUtilization >= WARNING_THRESHOLD,
+                isExceeded: quotaUtilization >= EXCEEDED_THRESHOLD,
+                warningThreshold: WARNING_THRESHOLD,
+                exceededThreshold: EXCEEDED_THRESHOLD,
                 totalExecutions
+            }
+        })
+    } catch (err) { next(err) }
+})
+
+// ── 5. GET /deadletters ───────────────────────────────────────────────────
+
+router.get('/deadletters', async (req, res, next) => {
+    try {
+        if (!validateCompanyId(req, res)) return
+
+        const dateRange = parseDateRange(req.query)
+        if (dateRange === null) {
+            return res.status(400).json({ success: false, message: 'Invalid date format' })
+        }
+
+        const match = buildBaseMatch(req, dateRange)
+
+        // Count by status
+        const statusCounts = await DeadLetter.aggregate([
+            { $match: match },
+            {
+                $group: {
+                    _id: '$status',
+                    count: { $sum: 1 }
+                }
+            },
+            { $project: { _id: 0, status: '$_id', count: 1 } }
+        ])
+
+        const totals = { open: 0, replayed: 0, discarded: 0, total: 0 }
+        statusCounts.forEach(({ status, count }) => {
+            if (status in totals) totals[status] = count
+            totals.total += count
+        })
+
+        // Count by failure reason for open entries
+        const openMatch = { ...match, status: 'open' }
+        const reasonCounts = await DeadLetter.aggregate([
+            { $match: openMatch },
+            {
+                $group: {
+                    _id: '$reason',
+                    count: { $sum: 1 }
+                }
+            },
+            { $project: { _id: 0, reason: '$_id', count: 1 } }
+        ])
+
+        // Recent dead letters (last 10 open entries)
+        const recent = await DeadLetter.find(openMatch)
+            .sort({ createdAt: -1 })
+            .limit(10)
+            .select('stepName reason error createdAt')
+            .lean()
+
+        res.json({
+            success: true,
+            data: {
+                ...totals,
+                byReason: reasonCounts,
+                recentOpen: recent.map(d => ({
+                    stepName: d.stepName || 'Unknown',
+                    reason: d.reason,
+                    error: d.error ? d.error.substring(0, 200) : null,
+                    createdAt: d.createdAt
+                }))
             }
         })
     } catch (err) { next(err) }
