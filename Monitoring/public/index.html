@@ -463,7 +463,7 @@
       async function fetchInitialStatus() {
         try {
           const res = await fetch('/api/status', {
-            headers: { 'X-Monitoring-Key': 'dev-monitoring-key-change-me' }
+            headers: { 'X-Monitoring-Key': window.__MONITORING_API_KEY || prompt('Enter Monitoring API Key:') || '' }
           });
           if (!res.ok) throw new Error('HTTP ' + res.status);
           const data = await res.json();
@@ -623,7 +623,7 @@
 
         const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
         const host = window.location.host || 'localhost:4000';
-        const wsUrl = `${protocol}//${host}/?apiKey=dev-monitoring-key-change-me`;
+        const wsUrl = `${protocol}//${host}/?apiKey=${window.__MONITORING_API_KEY || prompt('Enter Monitoring API Key:') || ''}`;
 
         transportBadge.className = 'transport-pill transport-reconnecting';
         transportBadge.textContent = reconnectAttempts > 0 ? `Reconnecting (${reconnectAttempts})...` : 'Connecting...';

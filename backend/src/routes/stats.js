@@ -1,6 +1,7 @@
 const router = require('express').Router()
 const mongoose = require('mongoose')
 const Execution = require('../models/Execution')
+const DeadLetter = require('../models/DeadLetter')
 const { tenantAuth } = require('../middleware/tenant')
 
 router.use(tenantAuth)
@@ -458,6 +459,69 @@ router.get('/quota', async (req, res, next) => {
                 remainingQuota,
                 quotaUtilization,
                 totalExecutions
+            }
+        })
+    } catch (err) { next(err) }
+})
+
+// ── 5. GET /deadletters ───────────────────────────────────────────────────
+
+router.get('/deadletters', async (req, res, next) => {
+    try {
+        if (!validateCompanyId(req, res)) return
+
+        const tenantObjId = new mongoose.Types.ObjectId(req.tenantId)
+
+        // Count by status
+        const statusCounts = await DeadLetter.aggregate([
+            { $match: { companyId: tenantObjId } },
+            {
+                $group: {
+                    _id: '$status',
+                    count: { $sum: 1 }
+                }
+            },
+            { $project: { _id: 0, status: '$_id', count: 1 } }
+        ])
+
+        const totals = { open: 0, replayed: 0, discarded: 0, total: 0 }
+        statusCounts.forEach(({ status, count }) => {
+            if (status in totals) totals[status] = count
+            totals.total += count
+        })
+
+        // Count by failure reason
+        const reasonCounts = await DeadLetter.aggregate([
+            { $match: { companyId: tenantObjId, status: 'open' } },
+            {
+                $group: {
+                    _id: '$reason',
+                    count: { $sum: 1 }
+                }
+            },
+            { $project: { _id: 0, reason: '$_id', count: 1 } }
+        ])
+
+        // Recent dead letters (last 10 open entries)
+        const recent = await DeadLetter.find(
+            { companyId: tenantObjId, status: 'open' }
+        )
+            .sort({ createdAt: -1 })
+            .limit(10)
+            .select('stepName reason error createdAt')
+            .lean()
+
+        res.json({
+            success: true,
+            data: {
+                ...totals,
+                byReason: reasonCounts,
+                recentOpen: recent.map(d => ({
+                    stepName: d.stepName || 'Unknown',
+                    reason: d.reason,
+                    error: d.error ? d.error.substring(0, 200) : null,
+                    createdAt: d.createdAt
+                }))
             }
         })
     } catch (err) { next(err) }

@@ -24,7 +24,7 @@ const alertsRoutes = require('./routes/alerts');
 const statusRoutes = require('./routes/status');
 
 const PORT = parseInt(process.env.PORT || '4000', 10);
-const MONGODB_URI = process.env.MONGODB_URI;
+const MONGODB_URI = process.env.MONITORING_MONGODB_URI || process.env.MONGODB_URI;
 const HEALTH_CHECK_INTERVAL = parseInt(process.env.HEALTH_CHECK_INTERVAL || '30', 10);
 
 // Startup security warning if no auth secrets configured
@@ -141,7 +141,7 @@ async function runMonitoringCycle() {
 // ── Start ──────────────────────────────────────────────────────────────────
 async function start() {
   if (!MONGODB_URI) {
-    logger.error('MONGODB_URI is not set in .env');
+    logger.error('Neither MONITORING_MONGODB_URI nor MONGODB_URI is set in .env');
     process.exit(1);
   }
 

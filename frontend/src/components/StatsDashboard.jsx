@@ -27,6 +27,7 @@ export default function StatsDashboard() {
   const [failures, setFailures] = useState(null);
   const [latency, setLatency] = useState(null);
   const [quota, setQuota] = useState(null);
+  const [deadLetters, setDeadLetters] = useState(null);
 
   // Loading & Error States
   const [loading, setLoading] = useState(false);
@@ -106,11 +107,14 @@ export default function StatsDashboard() {
     const qStr = queryParams.toString() ? `?${queryParams.toString()}` : '';
 
     try {
-      const [sumRes, failRes, latRes, quoRes] = await Promise.all([
+      const [sumRes, failRes, latRes, quoRes, dlRes] = await Promise.all([
         fetch(`${apiUrl}/api/stats/summary${qStr}`, { headers: getHeaders() }),
         fetch(`${apiUrl}/api/stats/failures${qStr}`, { headers: getHeaders() }),
         fetch(`${apiUrl}/api/stats/latency${qStr}`, { headers: getHeaders() }),
         fetch(`${apiUrl}/api/stats/quota${selectedCompanyId ? `?companyId=${selectedCompanyId}` : ''}`, {
+          headers: getHeaders(),
+        }),
+        fetch(`${apiUrl}/api/stats/deadletters${selectedCompanyId ? `?companyId=${selectedCompanyId}` : ''}`, {
           headers: getHeaders(),
         }),
       ]);
@@ -122,11 +126,12 @@ export default function StatsDashboard() {
         throw new Error('Access denied (403). Requested company does not belong to authenticated tenant.');
       }
 
-      const [sumJson, failJson, latJson, quoJson] = await Promise.all([
+      const [sumJson, failJson, latJson, quoJson, dlJson] = await Promise.all([
         sumRes.json(),
         failRes.json(),
         latRes.json(),
         quoRes.json(),
+        dlRes.json(),
       ]);
 
       if (!sumJson.success) throw new Error(sumJson.message || 'Failed to fetch summary stats');
@@ -138,6 +143,7 @@ export default function StatsDashboard() {
       setFailures(failJson.data);
       setLatency(latJson.data);
       setQuota(quoJson.data);
+      if (dlJson.success) setDeadLetters(dlJson.data);
       setLastRefreshed(new Date().toLocaleTimeString());
     } catch (err) {
       setError(err.message);
@@ -825,6 +831,16 @@ export default function StatsDashboard() {
               {quota ? `${quota.usedQuota} / ${quota.totalQuota} rpm` : 'Rate limit'}
             </div>
           </div>
+
+          <div className="stats-card">
+            <div className="stats-card-title">Dead Letters</div>
+            <div className="stats-card-value" style={{ color: deadLetters && deadLetters.open > 0 ? '#ef4444' : '#10b981' }}>
+              {deadLetters ? formatNum(deadLetters.open) : '--'}
+            </div>
+            <div className="stats-card-subtitle">
+              {deadLetters ? `${deadLetters.total} total (${deadLetters.replayed} replayed, ${deadLetters.discarded} discarded)` : 'Unresolved failures'}
+            </div>
+          </div>
         </div>
       </section>
 
@@ -876,6 +892,80 @@ export default function StatsDashboard() {
             Step Retry &amp; Attempt Analytics
           </div>
           {renderStepRetryStats()}
+        </section>
+      </div>
+
+      {/* ── Dead Letter Queue Details ── */}
+      <div className="stats-charts-grid">
+        <section className="stats-section" aria-labelledby="deadletter-title" style={{ gridColumn: '1 / -1' }}>
+          <div className="stats-section-title" id="deadletter-title">
+            Dead Letter Queue
+          </div>
+          {!deadLetters || deadLetters.total === 0 ? (
+            <div className="stats-empty">No dead-letter entries recorded for this tenant.</div>
+          ) : (
+            <div>
+              {/* Summary badges */}
+              <div style={{ display: 'flex', gap: '1rem', marginBottom: '1rem', flexWrap: 'wrap' }}>
+                <div style={{ padding: '0.5rem 1rem', borderRadius: '8px', background: 'rgba(239,68,68,0.15)', color: '#ef4444', fontWeight: 600 }}>
+                  Open: {deadLetters.open}
+                </div>
+                <div style={{ padding: '0.5rem 1rem', borderRadius: '8px', background: 'rgba(16,185,129,0.15)', color: '#10b981', fontWeight: 600 }}>
+                  Replayed: {deadLetters.replayed}
+                </div>
+                <div style={{ padding: '0.5rem 1rem', borderRadius: '8px', background: 'rgba(107,114,128,0.15)', color: '#6b7280', fontWeight: 600 }}>
+                  Discarded: {deadLetters.discarded}
+                </div>
+              </div>
+
+              {/* Failure reasons breakdown */}
+              {deadLetters.byReason && deadLetters.byReason.length > 0 && (
+                <div style={{ marginBottom: '1rem' }}>
+                  <div style={{ fontSize: '0.85rem', color: 'var(--text-muted)', marginBottom: '0.5rem' }}>Open Entries by Reason:</div>
+                  <div style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap' }}>
+                    {deadLetters.byReason.map((r, i) => (
+                      <div key={i} style={{ padding: '0.4rem 0.75rem', borderRadius: '6px', background: 'var(--bg-base)', fontSize: '0.85rem' }}>
+                        <span style={{ color: '#f59e0b', fontWeight: 600 }}>{r.reason}</span>: {r.count}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Recent open entries table */}
+              {deadLetters.recentOpen && deadLetters.recentOpen.length > 0 && (
+                <div>
+                  <div style={{ fontSize: '0.85rem', color: 'var(--text-muted)', marginBottom: '0.5rem' }}>Recent Open Entries:</div>
+                  <div style={{ overflowX: 'auto' }}>
+                    <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.85rem' }}>
+                      <thead>
+                        <tr style={{ borderBottom: '1px solid #334155' }}>
+                          <th style={{ textAlign: 'left', padding: '0.5rem', color: '#94a3b8' }}>Step</th>
+                          <th style={{ textAlign: 'left', padding: '0.5rem', color: '#94a3b8' }}>Reason</th>
+                          <th style={{ textAlign: 'left', padding: '0.5rem', color: '#94a3b8' }}>Error</th>
+                          <th style={{ textAlign: 'left', padding: '0.5rem', color: '#94a3b8' }}>Date</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {deadLetters.recentOpen.map((entry, i) => (
+                          <tr key={i} style={{ borderBottom: '1px solid #1e293b' }}>
+                            <td style={{ padding: '0.5rem', color: '#f8fafc', fontWeight: 600 }}>{entry.stepName}</td>
+                            <td style={{ padding: '0.5rem', color: '#f59e0b' }}>{entry.reason}</td>
+                            <td style={{ padding: '0.5rem', color: '#94a3b8', maxWidth: '300px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                              {entry.error || '—'}
+                            </td>
+                            <td style={{ padding: '0.5rem', color: '#94a3b8' }}>
+                              {new Date(entry.createdAt).toLocaleString()}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
         </section>
       </div>
     </div>

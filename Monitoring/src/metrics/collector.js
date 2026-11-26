@@ -47,6 +47,7 @@ async function collectSystemMetrics() {
 
 /**
  * Collect workflow metrics per tenant (companyId) from MongoDB.
+ * When a tenantId is provided, only that tenant's data is returned.
  * Returns:
  * {
  *   tenants: [ { companyId, total, pending, running, success, failed } ],
@@ -54,11 +55,15 @@ async function collectSystemMetrics() {
  *   recentFailureRate: number   // % of workflows in last 60 min that failed
  * }
  */
-async function collectWorkflowMetrics() {
+async function collectWorkflowMetrics(tenantId) {
   const Workflow = getWorkflowModel();
 
+  // Build initial match stage — scope to single tenant when specified
+  const matchStage = tenantId ? { $match: { companyId: tenantId } } : null;
+
   // Aggregate per tenant
-  const tenantAgg = await Workflow.aggregate([
+  const pipeline = [
+    ...(matchStage ? [matchStage] : []),
     {
       $group: {
         _id: '$companyId',
@@ -70,7 +75,8 @@ async function collectWorkflowMetrics() {
       },
     },
     { $sort: { _id: 1 } },
-  ]);
+  ];
+  const tenantAgg = await Workflow.aggregate(pipeline);
 
   // Global totals
   const global = tenantAgg.reduce(
@@ -86,8 +92,10 @@ async function collectWorkflowMetrics() {
 
   // Recent failure rate (last 60 minutes)
   const since = new Date(Date.now() - 60 * 60 * 1000);
+  const recentMatch = { updatedAt: { $gte: since } };
+  if (tenantId) recentMatch.companyId = tenantId;
   const recent = await Workflow.aggregate([
-    { $match: { updatedAt: { $gte: since } } },
+    { $match: recentMatch },
     {
       $group: {
         _id: null,

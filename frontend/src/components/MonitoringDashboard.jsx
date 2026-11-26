@@ -2,8 +2,8 @@ import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react'
 import './MonitoringDashboard.css';
 
 const DEFAULT_API_URL = import.meta.env.VITE_MONITORING_API_URL || 'http://localhost:4000';
-const DEFAULT_WS_URL = import.meta.env.VITE_MONITORING_WS_URL || 'ws://localhost:4000/?apiKey=dev-monitoring-key-change-me';
-const DEFAULT_API_KEY = import.meta.env.VITE_MONITORING_API_KEY || 'dev-monitoring-key-change-me';
+const DEFAULT_WS_URL = import.meta.env.VITE_MONITORING_WS_URL || '';
+const DEFAULT_API_KEY = import.meta.env.VITE_MONITORING_API_KEY || '';
 
 export function MonitoringDashboard({
   apiUrl = DEFAULT_API_URL,
